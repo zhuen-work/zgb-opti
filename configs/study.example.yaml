@@ -1,0 +1,14 @@
+study_name: "phase1-mt5-optimization"
+symbol: "XAUUSD"
+timeframe: "M15"
+
+ea_name: "ZGB5_v14_3"
+ea_path: "Experts\\ZGB5_v14_3.ex5"
+base_set_path: "Solo_Aggressive.set"
+mt5_terminal_path: "C:/Program Files/Vantage International MT5/terminal64.exe"
+output_root: "./output/optimizations"
+
+windows_weeks: [3, 4, 6, 8, 12]
+study_start: "2025-12-01"
+study_end: "2026-02-28"
+step_weeks: 1
