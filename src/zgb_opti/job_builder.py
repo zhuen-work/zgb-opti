@@ -31,8 +31,8 @@ def build_optimization_jobs(config: StudyConfig) -> list[OptimizationJob]:
                     symbol=config.symbol,
                     timeframe=config.timeframe,
                     ea_name=config.ea_name,
-                    ini_path=f"jobs/generated/{job_id}.ini",
-                    output_dir=f"output/optimizations/{job_id}",
+                    ini_path=f"jobs/generated/{config.study_name}_{job_id}.ini",
+                    output_dir=f"{config.output_root}/{job_id}",
                     status="pending",
                 )
             )

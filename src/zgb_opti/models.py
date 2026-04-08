@@ -12,11 +12,18 @@ class StudyConfig(BaseModel):
     ea_path: str
     base_set_path: str
     mt5_terminal_path: str
+    mt5_login: int
+    mt5_server: str
     output_root: str
     windows_weeks: list[int]
     study_start: date
     study_end: date
     step_weeks: int
+    deposit: int = 1_000_000
+    forward_weeks: int = 1
+    optimization_model: int = 1   # MT5 Model for optimization passes (1=Control Points, fast)
+    backtest_model: int = 0       # MT5 Model for forward/backtest validation (0=Every Tick, realistic)
+    spread: int = 45              # Spread override in points applied to all tester runs
 
     @field_validator("windows_weeks")
     @classmethod
