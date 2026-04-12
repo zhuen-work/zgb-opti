@@ -1,10 +1,14 @@
-"""DT818_exp_v3 reopt — 3-phase forward: S1 -> S2 -> S3, then HalfTP sweep.
+"""FBO component reopt (via FBO_FVG_v1 EA, FVG streams disabled).
 
+3-phase forward: S1(M30) -> S2(H4) -> S3(H1), then HalfTP sweep.
 Phase 1-3: sweep TP/SL/Bars/EMA with HalfTP=0 fixed.
 Phase 4:   all params fixed, sweep HalfTP1/2/3 together.
 IS: Feb 14 -> Apr 11, 2026  (8w)
 Next reopt: May 23, 2026
 Output set: configs/sets/dt818_exp_v3_3pct_m30xh4xh1_apr11_reopt_may23.set
+
+Note: Uses FBO_FVG_v1 EA (production EA) with _FVG1=0/_FVG2=0 to isolate
+      FBO streams. Do NOT use DT818_exp_v3 (research EA, retired).
 """
 from __future__ import annotations
 
@@ -23,7 +27,7 @@ TOP_N         = 5
 MT5_TERMINAL  = "C:/Program Files/Vantage International MT5/terminal64.exe"
 MT5_LOGIN     = 18912087
 MT5_SERVER    = "VantageInternational-Live 3"
-EA_PATH       = "DT818_exp_v3"
+EA_PATH       = "FBO_FVG_v1"
 SYMBOL        = "XAUUSD"
 PERIOD        = "M30"
 SPREAD        = 45
@@ -141,17 +145,18 @@ def _load_best(xml_path, job_id, parse_optimization_xml, write_passes, pd, key_c
 def _common_fixed():
     return [
         _fix("_BaseMagic", 1000),
-        "_OrderComment=DT818_A", "_OrderComment2=DT818_B", "_OrderComment3=DT818_C",
         _fix("_CapitalProtectionAmount", "0.0"),
         _fix("_LotMode", 1), _fix("_RiskPct", "3.0"),
         _fix("TierBase", 2000), _fix("LotStep", "0.01"),
-        # BETrigger disabled (baseline beats BE — from v3 test)
-        _fix("_BETrigger1", "0.0"), _fix("_BETrigger2", "0.0"), _fix("_BETrigger3", "0.0"),
+        _fix("_PendingExpireBars", 2),
+        # FVG streams disabled — isolating FBO component
+        _fix("_FVG1", 0), _fix("_FVG2", 0),
     ]
 
 def _s1_sweep():
     return [
-        _fix("_Trade1", 1), _fix("_time_frame", TF1_ENUM),
+        "_OrderComment=FBO_A",
+        _fix("_FBO1", 1), _fix("_time_frame", TF1_ENUM),
         _sweep("_take_profit",  TP_LO, TP_STEP,  TP_LO,  TP_HI),
         _sweep("_stop_loss",    SL_LO, SL_STEP,  SL_LO,  SL_HI),
         _sweep("_Bars",         BAR_LO, BAR_STEP, BAR_LO, BAR_HI),
@@ -161,7 +166,8 @@ def _s1_sweep():
 
 def _s1_fixed(tp, sl, bars, ema, htp, include_htp=True):
     lines = [
-        _fix("_Trade1", 1), _fix("_time_frame", TF1_ENUM),
+        "_OrderComment=FBO_A",
+        _fix("_FBO1", 1), _fix("_time_frame", TF1_ENUM),
         _fix("_take_profit", tp), _fix("_stop_loss", sl),
         _fix("_Bars", bars), _fix("_EMA_Period1", ema),
     ]
@@ -171,7 +177,8 @@ def _s1_fixed(tp, sl, bars, ema, htp, include_htp=True):
 
 def _s2_sweep():
     return [
-        _fix("_Trade2", 1), _fix("_time_frame2", TF2_ENUM),
+        "_OrderComment2=FBO_B",
+        _fix("_FBO2", 1), _fix("_time_frame2", TF2_ENUM),
         _sweep("_take_profit2", TP_LO, TP_STEP,  TP_LO,  TP_HI),
         _sweep("_stop_loss2",   SL_LO, SL_STEP,  SL_LO,  SL_HI),
         _sweep("_Bars2",        BAR_LO, BAR_STEP, BAR_LO, BAR_HI),
@@ -181,7 +188,8 @@ def _s2_sweep():
 
 def _s2_fixed(tp, sl, bars, ema, htp, include_htp=True):
     lines = [
-        _fix("_Trade2", 1), _fix("_time_frame2", TF2_ENUM),
+        "_OrderComment2=FBO_B",
+        _fix("_FBO2", 1), _fix("_time_frame2", TF2_ENUM),
         _fix("_take_profit2", tp), _fix("_stop_loss2", sl),
         _fix("_Bars2", bars), _fix("_EMA_Period2", ema),
     ]
@@ -190,13 +198,15 @@ def _s2_fixed(tp, sl, bars, ema, htp, include_htp=True):
     return lines
 
 def _s2_off():
-    return [_fix("_Trade2", 0), _fix("_time_frame2", TF2_ENUM),
+    return ["_OrderComment2=FBO_B",
+            _fix("_FBO2", 0), _fix("_time_frame2", TF2_ENUM),
             _fix("_take_profit2", 15000), _fix("_stop_loss2", 10000),
             _fix("_Bars2", 4), _fix("_EMA_Period2", 5), _fix("_HalfTP2", "0.0")]
 
 def _s3_sweep():
     return [
-        _fix("_Trade3", 1), _fix("_time_frame3", TF3_ENUM),
+        "_OrderComment3=FBO_C",
+        _fix("_FBO3", 1), _fix("_time_frame3", TF3_ENUM),
         _sweep("_take_profit3", TP_LO, TP_STEP,  TP_LO,  TP_HI),
         _sweep("_stop_loss3",   SL_LO, SL_STEP,  SL_LO,  SL_HI),
         _sweep("_Bars3",        BAR_LO, BAR_STEP, BAR_LO, BAR_HI),
@@ -206,7 +216,8 @@ def _s3_sweep():
 
 def _s3_fixed(tp, sl, bars, ema, htp, include_htp=True):
     lines = [
-        _fix("_Trade3", 1), _fix("_time_frame3", TF3_ENUM),
+        "_OrderComment3=FBO_C",
+        _fix("_FBO3", 1), _fix("_time_frame3", TF3_ENUM),
         _fix("_take_profit3", tp), _fix("_stop_loss3", sl),
         _fix("_Bars3", bars), _fix("_EMA_Period3", ema),
     ]
@@ -215,7 +226,8 @@ def _s3_fixed(tp, sl, bars, ema, htp, include_htp=True):
     return lines
 
 def _s3_off():
-    return [_fix("_Trade3", 0), _fix("_time_frame3", TF3_ENUM),
+    return ["_OrderComment3=FBO_C",
+            _fix("_FBO3", 0), _fix("_time_frame3", TF3_ENUM),
             _fix("_take_profit3", 15000), _fix("_stop_loss3", 10000),
             _fix("_Bars3", 4), _fix("_EMA_Period3", 5), _fix("_HalfTP3", "0.0")]
 
@@ -224,20 +236,23 @@ def _s3_off():
 
 def _build_val_ini(p, report_id):
     lines = "\n".join([
-        "_BaseMagic=1000", "_OrderComment=DT818_A", "_OrderComment2=DT818_B",
-        "_OrderComment3=DT818_C",
+        "_BaseMagic=1000",
         "_CapitalProtectionAmount=0.0", "_LotMode=1", f"_RiskPct={RISK_PCT_VAL}",
         "TierBase=2000", "LotStep=0.01",
-        "_BETrigger1=0.0", "_BETrigger2=0.0", "_BETrigger3=0.0",
-        f"_Trade1=1", f"_time_frame={TF1_ENUM}",
+        "_PendingExpireBars=2",
+        "_FVG1=0", "_FVG2=0",
+        "_OrderComment=FBO_A",
+        f"_FBO1=1", f"_time_frame={TF1_ENUM}",
         f"_take_profit={p['s1_tp']}",  f"_stop_loss={p['s1_sl']}",
         f"_Bars={p['s1_bars']}",        f"_EMA_Period1={p['s1_ema']}",
         f"_HalfTP1={p['s1_htp']:.1f}",
-        f"_Trade2=1", f"_time_frame2={TF2_ENUM}",
+        "_OrderComment2=FBO_B",
+        f"_FBO2=1", f"_time_frame2={TF2_ENUM}",
         f"_take_profit2={p['s2_tp']}", f"_stop_loss2={p['s2_sl']}",
         f"_Bars2={p['s2_bars']}",       f"_EMA_Period2={p['s2_ema']}",
         f"_HalfTP2={p['s2_htp']:.1f}",
-        f"_Trade3=1", f"_time_frame3={TF3_ENUM}",
+        "_OrderComment3=FBO_C",
+        f"_FBO3=1", f"_time_frame3={TF3_ENUM}",
         f"_take_profit3={p['s3_tp']}", f"_stop_loss3={p['s3_sl']}",
         f"_Bars3={p['s3_bars']}",       f"_EMA_Period3={p['s3_ema']}",
         f"_HalfTP3={p['s3_htp']:.1f}",
@@ -290,27 +305,26 @@ def _write_set(best_params):
         "_LotMode=1||1||1||1||1||N",
         "TierBase=2000||2000||1||2000||2000||N",
         "LotStep=0.01||0.01||1||0.01||0.01||N",
-        "_BETrigger1=0.0||0.0||1||0.0||0.0||N",
-        "_BETrigger2=0.0||0.0||1||0.0||0.0||N",
-        "_BETrigger3=0.0||0.0||1||0.0||0.0||N",
-        "_OrderComment=DT818_A",
-        f"_Trade1=1||1||1||1||1||N",
+        "_PendingExpireBars=2||2||1||2||2||N",
+        "_FBO1=1||1||1||1||1||N",
+        "_OrderComment=FBO_A",
         f"_time_frame={TF1_ENUM}||{TF1_ENUM}||1||{TF1_ENUM}||{TF1_ENUM}||N",
         f"_take_profit={best_params['s1_tp']}||{best_params['s1_tp']}||1||{best_params['s1_tp']}||{best_params['s1_tp']}||N",
         f"_stop_loss={best_params['s1_sl']}||{best_params['s1_sl']}||1||{best_params['s1_sl']}||{best_params['s1_sl']}||N",
         f"_Bars={best_params['s1_bars']}||{best_params['s1_bars']}||1||{best_params['s1_bars']}||{best_params['s1_bars']}||N",
         f"_EMA_Period1={best_params['s1_ema']}||{best_params['s1_ema']}||1||{best_params['s1_ema']}||{best_params['s1_ema']}||N",
         f"_HalfTP1={best_params['s1_htp']:.1f}||{best_params['s1_htp']:.1f}||1||{best_params['s1_htp']:.1f}||{best_params['s1_htp']:.1f}||N",
-        "_OrderComment2=DT818_B",
-        f"_Trade2=1||1||1||1||1||N",
+        "_FBO2=1||1||1||1||1||N",
+        "_OrderComment2=FBO_B",
         f"_time_frame2={TF2_ENUM}||{TF2_ENUM}||1||{TF2_ENUM}||{TF2_ENUM}||N",
         f"_take_profit2={best_params['s2_tp']}||{best_params['s2_tp']}||1||{best_params['s2_tp']}||{best_params['s2_tp']}||N",
         f"_stop_loss2={best_params['s2_sl']}||{best_params['s2_sl']}||1||{best_params['s2_sl']}||{best_params['s2_sl']}||N",
         f"_Bars2={best_params['s2_bars']}||{best_params['s2_bars']}||1||{best_params['s2_bars']}||{best_params['s2_bars']}||N",
         f"_EMA_Period2={best_params['s2_ema']}||{best_params['s2_ema']}||1||{best_params['s2_ema']}||{best_params['s2_ema']}||N",
         f"_HalfTP2={best_params['s2_htp']:.1f}||{best_params['s2_htp']:.1f}||1||{best_params['s2_htp']:.1f}||{best_params['s2_htp']:.1f}||N",
-        "_OrderComment3=DT818_C",
-        f"_Trade3=1||1||1||1||1||N",
+        "_FBO3=1||1||1||1||1||N",
+        "_OrderComment3=FBO_C",
+        f"_time_frame3={TF3_ENUM}||{TF3_ENUM}||1||{TF3_ENUM}||{TF3_ENUM}||N",
         f"_time_frame3={TF3_ENUM}||{TF3_ENUM}||1||{TF3_ENUM}||{TF3_ENUM}||N",
         f"_take_profit3={best_params['s3_tp']}||{best_params['s3_tp']}||1||{best_params['s3_tp']}||{best_params['s3_tp']}||N",
         f"_stop_loss3={best_params['s3_sl']}||{best_params['s3_sl']}||1||{best_params['s3_sl']}||{best_params['s3_sl']}||N",
@@ -332,7 +346,7 @@ def main():
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
     print("=" * 68)
-    print(f"  DT818_exp_v3 reopt  ({IS_TAG.upper()})")
+    print(f"  FBO component reopt via FBO_FVG_v1  ({IS_TAG.upper()})")
     print(f"  IS: {IS_START} -> {IS_END}  EA={EA_PATH}  Chart={PERIOD}")
     print(f"  Passes per phase: {PASSES_PER_PHASE:,}  x3 = {PASSES_PER_PHASE*3:,}  "
           f"+ HalfTP: {HTP_SWEEP_PASSES}  |  Total: {PASSES_PER_PHASE*3 + HTP_SWEEP_PASSES:,}")
