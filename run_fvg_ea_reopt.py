@@ -96,7 +96,7 @@ def _build_opti_ini(set_lines, report_id):
         f"Login={MT5_LOGIN}\nServer={MT5_SERVER}\nProxyEnable=0\nCertInstall=0\nNewsEnable=0\n"
         "\n[Charts]\n\n[Experts]\n\n[Tester]\n"
         f"Expert={EA_PATH}\nSymbol={SYMBOL}\nPeriod={PERIOD}\nModel=1\n"
-        "Optimization=1\nOptimizationCriterion=0\n"
+        "Optimization=2\nOptimizationCriterion=0\n"
         f"Deposit={DEPOSIT_OPT}\nSpread={SPREAD}\n"
         f"FromDate={IS_START.strftime('%Y.%m.%d')}\nToDate={IS_END.strftime('%Y.%m.%d')}\n"
         "ForwardMode=0\nVisual=0\nTesterStart=1\nReplaceReport=1\nShutdownTerminal=1\n"

@@ -91,7 +91,7 @@ def _build_opti_ini(set_lines, report_id):
         f"Login={MT5_LOGIN}\nServer={MT5_SERVER}\nProxyEnable=0\nCertInstall=0\nNewsEnable=0\n"
         "\n[Charts]\n\n[Experts]\n\n[Tester]\n"
         f"Expert={EA_PATH}\nSymbol={SYMBOL}\nPeriod={PERIOD}\nModel=1\n"
-        "Optimization=1\nOptimizationCriterion=0\n"
+        "Optimization=2\nOptimizationCriterion=0\n"
         f"Deposit={DEPOSIT_OPT}\nSpread={SPREAD}\n"
         f"FromDate={IS_START.strftime('%Y.%m.%d')}\nToDate={IS_END.strftime('%Y.%m.%d')}\n"
         "ForwardMode=0\nVisual=0\nTesterStart=1\nReplaceReport=1\nShutdownTerminal=1\n"
@@ -324,7 +324,6 @@ def _write_set(best_params):
         f"_HalfTP2={best_params['s2_htp']:.1f}||{best_params['s2_htp']:.1f}||1||{best_params['s2_htp']:.1f}||{best_params['s2_htp']:.1f}||N",
         "_FBO3=1||1||1||1||1||N",
         "_OrderComment3=FBO_C",
-        f"_time_frame3={TF3_ENUM}||{TF3_ENUM}||1||{TF3_ENUM}||{TF3_ENUM}||N",
         f"_time_frame3={TF3_ENUM}||{TF3_ENUM}||1||{TF3_ENUM}||{TF3_ENUM}||N",
         f"_take_profit3={best_params['s3_tp']}||{best_params['s3_tp']}||1||{best_params['s3_tp']}||{best_params['s3_tp']}||N",
         f"_stop_loss3={best_params['s3_sl']}||{best_params['s3_sl']}||1||{best_params['s3_sl']}||{best_params['s3_sl']}||N",
