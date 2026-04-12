@@ -19,7 +19,7 @@ if hasattr(sys.stdout, "buffer"):
 if hasattr(sys.stderr, "buffer"):
     sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace", line_buffering=True)
 
-DD_THRESHOLD  = 20.0
+DD_THRESHOLD  = 30.0
 TOP_N         = 5
 
 MT5_TERMINAL  = "C:/Program Files/Vantage International MT5/terminal64.exe"
@@ -27,9 +27,9 @@ MT5_LOGIN     = 18912087
 MT5_SERVER    = "VantageInternational-Live 3"
 EA_PATH       = "FBO_FVG_v1"
 SYMBOL        = "XAUUSD"
-PERIOD        = "M1"
+PERIOD        = "M5"
 SPREAD        = 45
-DEPOSIT_OPT   = 10_000_000
+DEPOSIT_OPT   = 100_000
 DEPOSIT_VAL   = 10_000
 RISK_PCT      = 3.0
 
@@ -51,12 +51,12 @@ MT5_DATA_ROOT = Path("C:/Users/Zhu-En/AppData/Roaming/MetaQuotes/Terminal/AE2CC2
 # SLBuf:   20-60 step 10      (5 values)
 # Expiry:  1-8 step 1         (8 values)
 
-MINSIZE_LO = 800;   MINSIZE_HI = 2400; MINSIZE_STEP = 200
-MAXAGE_LO  = 50;    MAXAGE_HI  = 250;  MAXAGE_STEP  = 50
-ZONES_LO   = 1;     ZONES_HI   = 5;    ZONES_STEP   = 1
-RR_LO      = 2.0;   RR_HI      = 5.0;  RR_STEP      = 0.5
-SLBUF_LO   = 20;    SLBUF_HI   = 60;   SLBUF_STEP   = 10
-EXPIRY_LO  = 1;     EXPIRY_HI  = 8;    EXPIRY_STEP  = 1
+MINSIZE_LO = 1200;  MINSIZE_HI = 2400; MINSIZE_STEP = 200   # was 800-2400; drop 800,1000
+MAXAGE_LO  = 100;   MAXAGE_HI  = 250;  MAXAGE_STEP  = 50   # was 50-250; drop 50
+ZONES_LO   = 2;     ZONES_HI   = 4;    ZONES_STEP   = 1    # was 1-5; drop 1,5
+RR_LO      = 3.0;   RR_HI      = 5.0;  RR_STEP      = 0.5  # was 2.0-5.0; drop 2.0,2.5
+SLBUF_LO   = 20;    SLBUF_HI   = 50;   SLBUF_STEP   = 10   # was 20-60; drop 60
+EXPIRY_LO  = 1;     EXPIRY_HI  = 7;    EXPIRY_STEP  = 2    # was 1-8 step 1; step 2 (1,3,5,7)
 
 PASSES = (
     len(range(MINSIZE_LO, MINSIZE_HI + 1, MINSIZE_STEP)) *
@@ -96,7 +96,7 @@ def _build_opti_ini(set_lines, report_id):
         f"Login={MT5_LOGIN}\nServer={MT5_SERVER}\nProxyEnable=0\nCertInstall=0\nNewsEnable=0\n"
         "\n[Charts]\n\n[Experts]\n\n[Tester]\n"
         f"Expert={EA_PATH}\nSymbol={SYMBOL}\nPeriod={PERIOD}\nModel=1\n"
-        "Optimization=2\nOptimizationCriterion=0\n"
+        "Optimization=1\nOptimizationCriterion=0\n"
         f"Deposit={DEPOSIT_OPT}\nSpread={SPREAD}\n"
         f"FromDate={IS_START.strftime('%Y.%m.%d')}\nToDate={IS_END.strftime('%Y.%m.%d')}\n"
         "ForwardMode=0\nVisual=0\nTesterStart=1\nReplaceReport=1\nShutdownTerminal=1\n"
