@@ -1,0 +1,17 @@
+_Magic=2000||2000||1||2000||2000||N
+_RiskPct=3.5||3.5||1||3.5||3.5||N
+_MaxPositions=1||1||1||1||1||N
+_EntryTF=5||5||1||5||5||N
+_DonchianBars=20||20||1||20||20||N
+_TakeProfit=150||150||1||150||150||N
+_StopLoss=50||50||1||50||50||N
+_HalfTP_Ratio=0.3||0.3||1||0.3||0.3||N
+_PendingExpireBars=2||2||1||2||2||N
+_DailyTargetPct=7.0||7.0||1||7.0||7.0||N
+_DailyLossPct=14.0||14.0||1||14.0||14.0||N
+_DailyMaxWins=0||0||1||0||0||N
+_DailyMaxLosses=0||0||1||0||0||N
+_TradeStartHour=14||14||1||14||14||N
+_TradeEndHour=22||22||1||22||22||N
+_BlockFriPM=true
+_OrderCommentTag=DT818
