@@ -1,0 +1,39 @@
+; LSFVG (Liquidity Sweep + Fair Value Gap) — Apr 25, 3% risk
+; Next WFO: May 9 2026
+;
+; Sanity ET (Feb 14 -> Apr 25, $10k): NP=$+1,921 (+19.2% ROI) / DD 5.0% /
+;   32 trades / WR 56.2% / PF 1.81 / NP/DD 384
+;
+; Selected over WFO grid winner (Lk=8 RR=3.0 HTP=0.0) because:
+;   - 3/3 OOS windows profitable vs 2/3 (WFO winner failed Apr 11-25)
+;   - 5.0% DD vs 11.5% — half the risk
+;   - Risk-adjusted ROI: 3.84 vs 2.65 (ROI/DD%)
+;   - 32 trades vs 18 — better compounding consistency
+;   - WFO winner's higher NP came entirely from one outlier window (W2)
+;
+; Strategy:
+;   On every M15 close, look back lookback_bars to find liquidity pool
+;   high/low. If bar 1-2 swept the pool AND bar 1 closed back inside AND
+;   a 3-bar bearish/bullish FVG formed (low[3] > high[1] for bearish),
+;   place a SellLimit/BuyLimit at the FVG edge. SL beyond sweep wick + buf,
+;   TP at SL_dist × RR. Half-TP split (50/50) at 1R+2R.
+;
+_BaseMagic=3000||3000||1||3000||3000||N
+_CapitalProtectionAmount=0.0||0.0||1||0.0||0.0||N
+_RiskPct=3.0||3.0||1||3.0||3.0||N
+_LotMode=1||1||1||1||1||N
+TierBase=2000||2000||1||2000||2000||N
+LotStep=0.01||0.01||1||0.01||0.01||N
+_OrderComment=LSFVG
+_SignalTF=15||15||1||15||15||N
+_LookbackBars=10||10||1||10||10||N
+_MinFVGPts=20||20||1||20||20||N
+_MaxFVGPts=5000||5000||1||5000||5000||N
+_SweepBufferPts=30||30||1||30||30||N
+_RR_Ratio=2.0||2.0||1||2.0||2.0||N
+_HalfTP_Ratio=0.5||0.5||1||0.5||0.5||N
+_PendingExpireBars=4||4||1||4||4||N
+_UseEMAFilter=false
+_EMA_Period=50||50||1||50||50||N
+_DailyTargetPct=0.0||0.0||1||0.0||0.0||N
+_DailyLossPct=0.0||0.0||1||0.0||0.0||N

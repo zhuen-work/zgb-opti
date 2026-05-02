@@ -1,0 +1,44 @@
+; FBO_FVG_v2 best-params snapshot — Apr 25 WFO
+; Canonical "current best" combining S1 (M30) and S2-M15 winners.
+; S3 disabled (failed robustness gate, NP/DD too low).
+; FVG streams disabled (not yet WFO'd).
+;
+; Each stream's params come from independent WFO at spread=60, $10k, 3% risk:
+;   S1 (M30):  3/3 OOS profitable, sanity NP=+$1,400 / DD=5.5%
+;   S2 (M15):  2/3 OOS profitable, sanity NP=+$5,360 / DD=13.8%
+; Combined sanity (S1 alone + S2-M15 alone running on shared $10k) untested.
+
+_BaseMagic=1000||1000||1||1000||1000||N
+_CapitalProtectionAmount=0.0||0.0||1||0.0||0.0||N
+_RiskPct=3.0||3.0||1||3.0||3.0||N
+_LotMode=1||1||1||1||1||N
+TierBase=2000||2000||1||2000||2000||N
+LotStep=0.01||0.01||1||0.01||0.01||N
+_PendingExpireBars1=2||2||1||2||2||N
+_PendingExpireBars2=4||4||1||4||4||N
+
+; --- FBO Stream 1 (M30) — S1 winner ---
+_FBO1=1||1||1||1||1||N
+_OrderComment=FBO_A
+_time_frame=30||30||1||30||30||N
+_take_profit=25000||25000||1||25000||25000||N
+_stop_loss=10000||10000||1||10000||10000||N
+_Bars=8||8||1||8||8||N
+_EMA_Period1=10||10||1||10||10||N
+_HalfTP1=0.3||0.3||1||0.3||0.3||N
+
+; --- FBO Stream 2 (M15) — S2-M15 winner ---
+_FBO2=1||1||1||1||1||N
+_OrderComment2=FBO_B
+_time_frame2=15||15||1||15||15||N
+_take_profit2=4000||4000||1||4000||4000||N
+_stop_loss2=4000||4000||1||4000||4000||N
+_Bars2=8||8||1||8||8||N
+_EMA_Period2=50||50||1||50||50||N
+_HalfTP2=0.6||0.6||1||0.6||0.6||N
+
+; (FBO Stream 3 removed from EA after Apr 25 WFO — failed robustness gate.)
+
+; --- FVG streams disabled (not yet WFO'd) ---
+_FVG1=0||0||1||0||0||N
+_FVG2=0||0||1||0||0||N

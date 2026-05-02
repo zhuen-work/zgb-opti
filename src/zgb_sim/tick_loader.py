@@ -9,6 +9,13 @@ import numpy as np
 import pandas as pd
 
 
+# Standard sim spread (pts) — applied to loaded ticks by default.
+# Real Vantage XAUUSD avg is ~25 pts; 70 is conservative for live execution variance.
+# Pass spread_pts=0 to load_ticks for raw real-tick spreads.
+SIM_SPREAD_PTS = 70
+XAUUSD_POINT = 0.01
+
+
 def kill_mt5_terminal() -> None:
     """Kill any running terminal64.exe (MT5). Safe to call when none running."""
     try:
@@ -54,7 +61,14 @@ def _pull_ticks_month(symbol: str, year: int, month: int) -> pd.DataFrame:
 
 def _pull_bars(symbol: str, tf: str, start: datetime, end: datetime) -> pd.DataFrame:
     import MetaTrader5 as mt5
-    tf_map = {"M1": mt5.TIMEFRAME_M1, "M5": mt5.TIMEFRAME_M5}
+    tf_map = {
+        "M1": mt5.TIMEFRAME_M1,
+        "M5": mt5.TIMEFRAME_M5,
+        "M15": mt5.TIMEFRAME_M15,
+        "M30": mt5.TIMEFRAME_M30,
+        "H1": mt5.TIMEFRAME_H1,
+        "H4": mt5.TIMEFRAME_H4,
+    }
     arr = mt5.copy_rates_range(symbol, tf_map[tf], start, end)
     if arr is None or len(arr) == 0:
         raise RuntimeError(f"No bars for {symbol} {tf}: {mt5.last_error()}")
@@ -64,8 +78,26 @@ def _pull_bars(symbol: str, tf: str, start: datetime, end: datetime) -> pd.DataF
     return df.reset_index(drop=True)
 
 
-def load_ticks(symbol: str, start: datetime, end: datetime) -> pd.DataFrame:
-    """Load ticks [start, end) UTC. Caches per-month in parquet. Returns df with ts, bid, ask."""
+def _apply_spread_override(df: pd.DataFrame, spread_pts: int, point: float) -> pd.DataFrame:
+    """Override real bid/ask with synthetic fixed spread centered on mid."""
+    if spread_pts <= 0:
+        return df
+    mid = (df["bid"] + df["ask"]) / 2.0
+    half = spread_pts * point / 2.0
+    df = df.copy()
+    df["bid"] = mid - half
+    df["ask"] = mid + half
+    return df
+
+
+def load_ticks(symbol: str, start: datetime, end: datetime,
+               spread_pts: int | None = None) -> pd.DataFrame:
+    """Load ticks [start, end) UTC. Caches per-month in parquet.
+
+    spread_pts: synthetic fixed spread to apply (overrides real bid/ask).
+                None (default) = use SIM_SPREAD_PTS module constant (60).
+                0 = preserve real recorded spreads.
+    """
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
     # Figure out which months we need
     months = set()
@@ -79,17 +111,59 @@ def load_ticks(symbol: str, start: datetime, end: datetime) -> pd.DataFrame:
         else:
             d = datetime(d.year, d.month + 1, 1, tzinfo=timezone.utc)
 
+    # Coverage check: a per-month file is "complete" only if it covers
+    # through the end of its month. If the cached file was written mid-month
+    # it'll have a max(ts) earlier than month-end and must be re-pulled.
+    end_utc_check = end if end.tzinfo else end.replace(tzinfo=timezone.utc)
+    today_utc = datetime.now(timezone.utc)
+
+    def _month_end_utc(yy: int, mm: int) -> datetime:
+        if mm == 12:
+            return datetime(yy + 1, 1, 1, tzinfo=timezone.utc) - timedelta(seconds=1)
+        return datetime(yy, mm + 1, 1, tzinfo=timezone.utc) - timedelta(seconds=1)
+
+    def _is_cache_stale(path: Path, yy: int, mm: int) -> bool:
+        try:
+            df = pd.read_parquet(path, columns=["ts"])
+        except Exception:
+            return True
+        if df.empty:
+            return True
+        cached_max = pd.Timestamp(df["ts"].max())
+        if cached_max.tz is None:
+            cached_max = cached_max.tz_localize("UTC")
+        # For a fully-past month we expect cache through month-end (or close).
+        # For the current month we expect cache through "yesterday" at minimum.
+        month_end = _month_end_utc(yy, mm)
+        target = min(month_end, today_utc - timedelta(days=1))
+        # Allow 2-day grace for weekends/holidays where forex was closed
+        return cached_max < target - timedelta(days=2)
+
     parts = []
     need_mt5 = False
+    stale_months: list[tuple[int, int]] = []
     for y, m in sorted(months):
         p = _ticks_cache_path(symbol, y, m)
-        if p.exists():
-            parts.append(pd.read_parquet(p))
-        else:
+        if not p.exists():
             need_mt5 = True
             break
+        # Only check staleness for the requested-window's last month
+        # (older months are assumed complete once cached)
+        is_last_month = (y == end_utc_check.year and m == end_utc_check.month) or \
+                        (y == today_utc.year and m == today_utc.month)
+        if is_last_month and _is_cache_stale(p, y, m):
+            print(f"  [tick cache] {symbol} {y}-{m:02d} is stale -- re-pulling.")
+            stale_months.append((y, m))
+            need_mt5 = True
+            break
+        parts.append(pd.read_parquet(p))
 
     if need_mt5:
+        # Delete any stale files so the re-pull can replace them cleanly
+        for y, m in stale_months:
+            p = _ticks_cache_path(symbol, y, m)
+            try: p.unlink()
+            except Exception: pass
         import MetaTrader5 as mt5
         if not mt5.initialize():
             raise RuntimeError(f"MT5 init failed: {mt5.last_error()}")
@@ -113,11 +187,19 @@ def load_ticks(symbol: str, start: datetime, end: datetime) -> pd.DataFrame:
     start_utc = start if start.tzinfo else start.replace(tzinfo=timezone.utc)
     end_utc = end if end.tzinfo else end.replace(tzinfo=timezone.utc)
     ticks = ticks[(ticks["ts"] >= start_utc) & (ticks["ts"] < end_utc)].reset_index(drop=True)
+
+    # Apply standard sim spread override
+    eff_spread = SIM_SPREAD_PTS if spread_pts is None else spread_pts
+    if eff_spread > 0 and symbol == "XAUUSD":
+        ticks = _apply_spread_override(ticks, eff_spread, XAUUSD_POINT)
     return ticks
 
 
 def load_bars(symbol: str, tf: str, start: datetime, end: datetime) -> pd.DataFrame:
-    """Load M1 or M5 bars [start, end] UTC. Cached in one parquet per (symbol, tf)."""
+    """Load OHLC bars [start, end] UTC. Cached one parquet per (symbol, tf).
+
+    Supported TFs: M1, M5, M15, M30, H1, H4.
+    """
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
     p = _bars_cache_path(symbol, tf)
     start_utc = start if start.tzinfo else start.replace(tzinfo=timezone.utc)

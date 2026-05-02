@@ -1,0 +1,16 @@
+_BaseMagic=3000||3000||1||3000||3000||N
+_RiskPct=1.0||1.0||1||1.0||1.0||N
+_LotMode=1||1||1||1||1||N
+_DailyTargetPct=9.0||9.0||1||9.0||9.0||N
+_DailyLossPct=6.0||6.0||1||6.0||6.0||N
+_S1_Enabled=true
+_S1_Comment=ORB
+_S1_RangeMinutes=60||60||1||60||60||N
+_S1_BufferPts=0||0||1||0||0||N
+_S1_MinRangePts=200||200||1||200||200||N
+_S1_MaxRangePts=5000||5000||1||5000||5000||N
+_S1_FixedSL_Pts=400||400||1||400||400||N
+_S1_RR_Ratio=3.0||3.0||1||3.0||3.0||N
+_S1_HalfTP_Ratio=0.0||0.0||1||0.0||0.0||N
+_S1_PendingExpireMinutes=120||120||1||120||120||N
+_S2_Enabled=false

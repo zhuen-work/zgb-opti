@@ -1,7 +1,7 @@
 """Full WFO using the Python simulator (no MT5 tester involvement).
 
 Flow:
-  1. Build config grid (576 combos).
+  1. Build config grid (3,750 combos, HTP=0 fixed, wider exhaustive).
   2. For each IS window: parallel sweep -> top-20 by recovery factor.
   3. Cross-window robust filter -> top-5 unique candidates.
   4. OOS validation on each OOS window.
@@ -47,48 +47,65 @@ WINDOWS = [
 PREWARM_START = date(2026, 2, 12)
 PREWARM_END   = date(2026, 4, 25)
 
-OUT_DIR = ROOT / "output" / "sim_wfo_s2_apr25"
-SET_OUT = ROOT / "configs" / "sets" / "scalp_v2_s2_sim_apr25.set"
-
-# Asian session — S2 hours
-S2_START_HOUR = 1
-S2_END_HOUR   = 8
+OUT_DIR = ROOT / "output" / "sim_wfo_spread60_wide_apr25"
+SET_OUT = ROOT / "configs" / "sets" / "scalp_v1_sim_spread60_wide_apr25.set"
 
 
-def build_config_grid(tiny: bool = False) -> list[S1Config]:
-    """S2 (Asian session) sweep — same params as S1 sweep but Asian hours."""
+def build_config_grid(tiny: bool = False, hedge: bool = False) -> list[S1Config]:
+    """Wider exhaustive sweep at 60-pt spread, HTP=0 fixed.
+
+    Coverage extensions vs the prior narrow run:
+      - Donch widened to 25..70 (catches both chop and trend regimes).
+      - TP extended to 2500 (high R:R against 60pt spread).
+      - SL 150..750 (user-set floor=150; ceiling at 750 since beyond that,
+        lot-clamp on $100 deposit pushes real per-stop loss above 7.5% of
+        equity, breaking the 1% risk model).
+      - Tgt 12..50 (12 keeps W3 winner pattern; 50 keeps W1 "let it ride";
+        9 dropped — redundant with 12 once TP>=1000 clamps lot-reward to $20).
+      - Loss 4..25 (Loss=4 self-destructs at SL>=500, intentional — the
+        optimizer will discard those rows).
+      - HTP fixed at 0.0 (HTP test verdict: not worth sweeping).
+
+    Total: 6 * 5 * 5 * 5 * 5 = 3,750 combos.
+    """
     if tiny:
-        donch_vals = (20, 25)
-        tp_vals = (150, 200)
-        sl_vals = (50,)
-        htp_vals = (0.3, 0.6)
-        tgt_vals = (3.0, 6.0)
+        donch_vals = (50,)
+        tp_vals = (1500,)
+        sl_vals = (200,)
+        htp_vals = (0.0,)
+        tgt_vals = (18.0,)
+        loss_vals = (8.0,)
+        peb_vals = (2,)
     else:
-        donch_vals = (15, 20, 25, 30)
-        tp_vals = (100, 150, 200, 250)
-        sl_vals = (50, 75, 100)
-        htp_vals = (0.0, 0.3, 0.6, 0.9)
-        tgt_vals = (3.0, 6.0, 9.0)
-    grid = []
+        donch_vals = (25, 30, 40, 50, 60, 70)
+        tp_vals = (750, 1000, 1500, 2000, 2500)
+        sl_vals = (150, 200, 300, 500, 750)
+        htp_vals = (0.0,)
+        tgt_vals = (12.0, 18.0, 25.0, 35.0, 50.0)
+        loss_vals = (4.0, 8.0, 12.0, 18.0, 25.0)
+        peb_vals = (2,)
+    grid: list[S1Config] = []
     for donch in donch_vals:
         for tp in tp_vals:
             for sl in sl_vals:
                 for htp in htp_vals:
                     for tgt in tgt_vals:
-                        grid.append(S1Config(
-                            risk_pct=RISK_PCT,
-                            donchian_bars=donch,
-                            take_profit_pts=tp,
-                            stop_loss_pts=sl,
-                            half_tp_ratio=htp,
-                            pending_expire_bars=2,
-                            start_hour=S2_START_HOUR,
-                            end_hour=S2_END_HOUR,
-                            daily_target_pct=tgt,
-                            daily_loss_pct=12.0,
-                            block_fri_pm=True,
-                            hedge_mode=False,
-                        ))
+                        for loss in loss_vals:
+                            for peb in peb_vals:
+                                grid.append(S1Config(
+                                    risk_pct=RISK_PCT,
+                                    donchian_bars=donch,
+                                    take_profit_pts=tp,
+                                    stop_loss_pts=sl,
+                                    half_tp_ratio=htp,
+                                    pending_expire_bars=peb,
+                                    start_hour=14,
+                                    end_hour=22,
+                                    daily_target_pct=tgt,
+                                    daily_loss_pct=loss,
+                                    block_fri_pm=True,
+                                    hedge_mode=hedge,
+                                ))
     return grid
 
 
@@ -97,13 +114,15 @@ def _to_utc(d: date) -> datetime:
 
 
 def _param_key(row) -> tuple:
-    """Key used for cross-window robust matching."""
+    """Key used for cross-window robust matching (Phase A: includes peb + loss)."""
     return (
         int(row["donchian_bars"]),
         int(row["take_profit_pts"]),
         int(row["stop_loss_pts"]),
         round(float(row["half_tp_ratio"]), 2),
         round(float(row["daily_target_pct"]), 2),
+        round(float(row["daily_loss_pct"]), 2),
+        int(row["pending_expire_bars"]),
     )
 
 
@@ -128,18 +147,23 @@ def print_top5(df: pd.DataFrame, label: str):
     profitable = df[(df["net_profit"] > 0) & (df["trades"] >= 10) & df["error"].isna()]
     top = profitable.sort_values("recovery_factor", ascending=False).head(5)
     print(f"\n  {label}: top-5 by Recovery Factor (of {len(profitable)} profitable):")
-    print(f"    {'NP':>10}  {'ROI%':>7}  {'PF':>6}  {'DD':>6}  {'Tr':>4}  {'RF':>8}  Donch  TP  SL  HTP  Tgt")
+    print(f"    {'NP':>10}  {'ROI%':>7}  {'PF':>6}  {'DD':>6}  {'Tr':>4}  {'RF':>8}  Donch  TP  SL  HTP  Tgt  Loss  PEB")
     for _, r in top.iterrows():
         print(f"    {r['net_profit']:>+10,.2f}  {r['return_pct']:>+6.1f}%  "
               f"{r['profit_factor']:>6.2f}  "
               f"{r['drawdown_pct']:>5.1f}%  {int(r['trades']):>4}  {r['recovery_factor']:>8.1f}  "
               f"{int(r['donchian_bars']):>5}  {int(r['take_profit_pts']):>3}  "
               f"{int(r['stop_loss_pts']):>3}  {r['half_tp_ratio']:>4.1f}  "
-              f"{int(r['daily_target_pct']):>3}")
+              f"{int(r['daily_target_pct']):>3}  {int(r['daily_loss_pct']):>4}  {int(r['pending_expire_bars']):>3}")
 
 
-def select_robust(per_window: dict[str, pd.DataFrame], top_n: int = 20) -> list[S1Config]:
-    """Params appearing in top-N of >=2 windows. Dedupe by total NP, take top-5."""
+def select_robust(per_window: dict[str, pd.DataFrame], top_n: int = 30,
+                  max_candidates: int = 15) -> list[S1Config]:
+    """Params appearing in top-N of >=2 windows. Dedupe by total NP, take top-N candidates.
+
+    Wider top_n (30) and bigger candidate pool (15) give the OOS phase more
+    shots at finding a >=2/3-window-profitable winner under the new gate.
+    """
     counts = {}
     for win_label, df in per_window.items():
         profitable = df[(df["net_profit"] > 0) & (df["trades"] >= 10) & df["error"].isna()]
@@ -157,11 +181,11 @@ def select_robust(per_window: dict[str, pd.DataFrame], top_n: int = 20) -> list[
     print(f"\n  Robust params (in top-{top_n} of 2+ windows): {len(robust)}")
 
     if not robust:
-        # Fallback: take top-10 from each window's top-N combined
+        # Fallback: take top-RF from each window's top-N combined
         print("  No robust params! Falling back to top-RF from all windows.")
         combined = list(counts.items())
         combined.sort(key=lambda x: -x[1]["total_rf"])
-        robust = combined[:10]
+        robust = combined[: max_candidates * 2]
 
     robust.sort(key=lambda x: -x[1]["total_rf"])
     seen_np = set()
@@ -172,7 +196,7 @@ def select_robust(per_window: dict[str, pd.DataFrame], top_n: int = 20) -> list[
             continue
         seen_np.add(np_key)
         unique.append((k, info))
-        if len(unique) >= 5:
+        if len(unique) >= max_candidates:
             break
 
     # Build S1Config from sample_row
@@ -185,16 +209,16 @@ def select_robust(per_window: dict[str, pd.DataFrame], top_n: int = 20) -> list[
             take_profit_pts=int(r["take_profit_pts"]),
             stop_loss_pts=int(r["stop_loss_pts"]),
             half_tp_ratio=round(float(r["half_tp_ratio"]), 2),
-            pending_expire_bars=2,
-            start_hour=S2_START_HOUR,
-            end_hour=S2_END_HOUR,
+            pending_expire_bars=int(r["pending_expire_bars"]),
+            start_hour=14,
+            end_hour=22,
             daily_target_pct=float(r["daily_target_pct"]),
-            daily_loss_pct=12.0,
+            daily_loss_pct=float(r["daily_loss_pct"]),
             block_fri_pm=True,
-            hedge_mode=False,
+            hedge_mode=bool(r["hedge_mode"]),
         ))
         print(f"    #{len(candidates)} Donch={k[0]} TP={k[1]} SL={k[2]} HTP={k[3]} "
-              f"Tgt={k[4]}  "
+              f"Tgt={k[4]} Loss={k[5]} PEB={k[6]}  "
               f"(windows={info['windows']}  total_NP={info['total_np']:+,.0f})")
     return candidates
 
@@ -217,13 +241,21 @@ def run_oos_phase(candidates: list[S1Config], meta: SymbolMeta) -> dict[str, pd.
 
 
 def rank_oos(candidates: list[S1Config], oos_per_window: dict[str, pd.DataFrame]):
-    """Compute per-candidate OOS totals, rank by NP/avg-DD ratio."""
+    """Compute per-candidate OOS totals.
+
+    Ranking key (highest-priority first):
+      1. prof_count: number of OOS windows with NP > 0 (3 > 2 > 1 > 0)
+      2. np_dd_ratio: total NP / mean OOS DD (NP/DD tie-breaker)
+
+    Phase B promotes ALL_PROF (>=3) automatically; this gate also rewards 2/3
+    candidates over 1/3 candidates that happen to have one big winning window.
+    """
     rows = []
     for i, cfg in enumerate(candidates):
         total_np = 0.0
         total_tr = 0
         dds = []
-        all_prof = True
+        prof_count = 0
         per_win = []
         for win_label, _, _, _, _ in WINDOWS:
             r = oos_per_window[win_label].iloc[i]  # preserved order
@@ -231,59 +263,40 @@ def rank_oos(candidates: list[S1Config], oos_per_window: dict[str, pd.DataFrame]
             total_np += float(r["net_profit"])
             total_tr += int(r["trades"])
             dds.append(float(r["drawdown_pct"]))
-            if r["net_profit"] <= 0:
-                all_prof = False
+            if r["net_profit"] > 0:
+                prof_count += 1
         avg_dd = sum(dds) / len(dds) if dds else 0.5
         np_dd_ratio = total_np / max(avg_dd, 0.5)
         rows.append({
             "cfg": cfg, "total_np": total_np, "total_tr": total_tr,
-            "all_prof": all_prof, "per_win": per_win,
-            "avg_dd": avg_dd, "np_dd_ratio": np_dd_ratio,
+            "all_prof": prof_count == len(WINDOWS), "prof_count": prof_count,
+            "per_win": per_win, "avg_dd": avg_dd, "np_dd_ratio": np_dd_ratio,
         })
-    rows.sort(key=lambda x: (x["all_prof"], x["np_dd_ratio"]), reverse=True)
+    rows.sort(key=lambda x: (x["prof_count"], x["np_dd_ratio"]), reverse=True)
     return rows
 
 
 def write_setfile(cfg: S1Config, path: Path):
-    """Write a Scalper_v2 setfile with S1 disabled, S2 enabled (the WFO winner)."""
     c = asdict(cfg)
     lines = [
-        # S1 disabled
-        f"_S1_Enabled=false",
-        f"_S1_Magic=2000||2000||1||2000||2000||N",
+        f"_Magic=2000||2000||1||2000||2000||N",
+        f"_EntryTF=5||5||1||5||5||N",
+        f"_BlockFriPM={'true' if c['block_fri_pm'] else 'false'}",
+        f"_S1_Enabled=true",
         f"_S1_Comment=DT818_S1",
-        f"_S1_EntryTF=5||5||1||5||5||N",
-        f"_S1_RiskPct=1.0||1.0||1||1.0||1.0||N",
-        f"_S1_DonchianBars=30||30||1||30||30||N",
-        f"_S1_TakeProfit=150||150||1||150||150||N",
-        f"_S1_StopLoss=50||50||1||50||50||N",
-        f"_S1_HalfTP_Ratio=0.6||0.6||1||0.6||0.6||N",
-        f"_S1_PendingExpireBars=2||2||1||2||2||N",
-        f"_S1_TradeStartHour=14||14||1||14||14||N",
-        f"_S1_TradeEndHour=22||22||1||22||22||N",
-        f"_S1_DailyTargetPct=9.0||9.0||1||9.0||9.0||N",
-        f"_S1_DailyLossPct=12.0||12.0||1||12.0||12.0||N",
+        f"_S1_RiskPct={c['risk_pct']}||{c['risk_pct']}||1||{c['risk_pct']}||{c['risk_pct']}||N",
+        f"_S1_DonchianBars={c['donchian_bars']}||{c['donchian_bars']}||1||{c['donchian_bars']}||{c['donchian_bars']}||N",
+        f"_S1_TakeProfit={c['take_profit_pts']}||{c['take_profit_pts']}||1||{c['take_profit_pts']}||{c['take_profit_pts']}||N",
+        f"_S1_StopLoss={c['stop_loss_pts']}||{c['stop_loss_pts']}||1||{c['stop_loss_pts']}||{c['stop_loss_pts']}||N",
+        f"_S1_HalfTP_Ratio={c['half_tp_ratio']}||{c['half_tp_ratio']}||1||{c['half_tp_ratio']}||{c['half_tp_ratio']}||N",
+        f"_S1_PendingExpireBars={c['pending_expire_bars']}||{c['pending_expire_bars']}||1||{c['pending_expire_bars']}||{c['pending_expire_bars']}||N",
+        f"_S1_TradeStartHour={c['start_hour']}||{c['start_hour']}||1||{c['start_hour']}||{c['start_hour']}||N",
+        f"_S1_TradeEndHour={c['end_hour']}||{c['end_hour']}||1||{c['end_hour']}||{c['end_hour']}||N",
+        f"_S1_DailyTargetPct={c['daily_target_pct']}||{c['daily_target_pct']}||1||{c['daily_target_pct']}||{c['daily_target_pct']}||N",
+        f"_S1_DailyLossPct={c['daily_loss_pct']}||{c['daily_loss_pct']}||1||{c['daily_loss_pct']}||{c['daily_loss_pct']}||N",
         f"_S1_DailyMaxWins=0||0||1||0||0||N",
         f"_S1_DailyMaxLosses=0||0||1||0||0||N",
-        f"_S1_HedgeMode=false",
-        # S2 enabled (WFO winner)
-        f"_S2_Enabled=true",
-        f"_S2_Magic=2001||2001||1||2001||2001||N",
-        f"_S2_Comment=DT818_S2",
-        f"_S2_EntryTF=5||5||1||5||5||N",
-        f"_S2_RiskPct={c['risk_pct']}||{c['risk_pct']}||1||{c['risk_pct']}||{c['risk_pct']}||N",
-        f"_S2_DonchianBars={c['donchian_bars']}||{c['donchian_bars']}||1||{c['donchian_bars']}||{c['donchian_bars']}||N",
-        f"_S2_TakeProfit={c['take_profit_pts']}||{c['take_profit_pts']}||1||{c['take_profit_pts']}||{c['take_profit_pts']}||N",
-        f"_S2_StopLoss={c['stop_loss_pts']}||{c['stop_loss_pts']}||1||{c['stop_loss_pts']}||{c['stop_loss_pts']}||N",
-        f"_S2_HalfTP_Ratio={c['half_tp_ratio']}||{c['half_tp_ratio']}||1||{c['half_tp_ratio']}||{c['half_tp_ratio']}||N",
-        f"_S2_PendingExpireBars={c['pending_expire_bars']}||{c['pending_expire_bars']}||1||{c['pending_expire_bars']}||{c['pending_expire_bars']}||N",
-        f"_S2_TradeStartHour={c['start_hour']}||{c['start_hour']}||1||{c['start_hour']}||{c['start_hour']}||N",
-        f"_S2_TradeEndHour={c['end_hour']}||{c['end_hour']}||1||{c['end_hour']}||{c['end_hour']}||N",
-        f"_S2_DailyTargetPct={c['daily_target_pct']}||{c['daily_target_pct']}||1||{c['daily_target_pct']}||{c['daily_target_pct']}||N",
-        f"_S2_DailyLossPct={c['daily_loss_pct']}||{c['daily_loss_pct']}||1||{c['daily_loss_pct']}||{c['daily_loss_pct']}||N",
-        f"_S2_DailyMaxWins=0||0||1||0||0||N",
-        f"_S2_DailyMaxLosses=0||0||1||0||0||N",
-        f"_S2_HedgeMode={'true' if c['hedge_mode'] else 'false'}",
+        f"_S1_HedgeMode={'true' if c['hedge_mode'] else 'false'}",
     ]
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
@@ -309,6 +322,8 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--tiny", action="store_true",
                     help="Small grid (16 configs) for end-to-end sanity (~15 min)")
+    ap.add_argument("--hedge", action="store_true",
+                    help="Run with hedge_mode=True (mirror SellLimit/BuyLimit at each breakout)")
     ap.add_argument("--out-dir", default=None,
                     help="Override output dir (caches + setfile)")
     args = ap.parse_args()
@@ -317,14 +332,14 @@ def main():
     if args.out_dir:
         OUT_DIR = Path(args.out_dir)
     if args.tiny:
-        OUT_DIR = ROOT / "output" / "sim_wfo_tiny"
-        SET_OUT = ROOT / "configs" / "sets" / "scalp_v1_sim_tiny.set"
+        OUT_DIR = ROOT / "output" / "sim_wfo_spread60_wide_tiny"
+        SET_OUT = ROOT / "configs" / "sets" / "scalp_v1_sim_spread60_wide_tiny.set"
 
     try:
         OUT_DIR.mkdir(parents=True, exist_ok=True)
         print("=" * 72)
-        mode = "TINY (sanity)" if args.tiny else "FULL (576 combos)"
-        print(f"  PYSIM WFO S2 Asian (1-8 UTC) — Apr 25   [{mode}]")
+        mode = "TINY (sanity)" if args.tiny else "WIDE (3,750 combos, HTP=0)"
+        print(f"  PYSIM WFO WIDE (Apr 25, spread=60) — 3 windows, sim IS+OOS   [{mode}]")
         print("=" * 72)
 
         m = symbol_meta(SYMBOL)
@@ -346,8 +361,9 @@ def main():
         print(f"  Pre-warm done in {time.time()-t0:.1f}s")
 
         # Build grid
-        configs = build_config_grid(tiny=args.tiny)
-        print(f"\n  Config grid: {len(configs)} combos")
+        configs = build_config_grid(tiny=args.tiny, hedge=args.hedge)
+        hedge_label = " HEDGE=ON" if args.hedge else ""
+        print(f"\n  Config grid: {len(configs)} combos{hedge_label}")
 
         # Phase A: IS sweep per window
         print("\n" + "=" * 72)
@@ -361,7 +377,7 @@ def main():
         print("\n" + "=" * 72)
         print("  PHASE B: Cross-Window Robust Selection")
         print("=" * 72)
-        candidates = select_robust(is_per_window, top_n=20)
+        candidates = select_robust(is_per_window, top_n=30, max_candidates=15)
         if not candidates:
             print("  No candidates. Aborting.")
             return
@@ -380,20 +396,24 @@ def main():
 
         # Phase D: Final ranking
         print("\n" + "=" * 72)
-        print("  PHASE D: FINAL RANKING (by NP/AvgDD ratio)")
+        print("  PHASE D: FINAL RANKING (by ProfCount, then NP/AvgDD ratio)")
         print("=" * 72)
         ranked = rank_oos(candidates, oos_per_window)
-        print(f"\n  {'Rank':<5}{'Total OOS NP':>15}{'ROI%':>9}{'All Prof':>10}  Params")
+        print(f"\n  {'Rank':<5}{'Total OOS NP':>15}{'ROI%':>9}{'AvgDD':>8}"
+              f"{'NP/DD':>8}{'Prof':>6}  Params")
         for rank, row in enumerate(ranked, 1):
             cfg = row["cfg"]
-            flag = "Y" if row["all_prof"] else "N"
             # Return % measured against initial deposit per OOS run
             # (each OOS window starts from DEPOSIT, 3 independent runs)
             total_ret_pct = row["total_np"] / (DEPOSIT * len(WINDOWS)) * 100.0
+            prof_str = f"{row['prof_count']}/{len(WINDOWS)}"
             print(f"  {rank:<5}{row['total_np']:>+14,.2f}{total_ret_pct:>+7.1f}%"
-                  f"{row['avg_dd']:>7.1f}%{row['np_dd_ratio']:>8.1f}{flag:>9}  "
+                  f"{row['avg_dd']:>7.1f}%{row['np_dd_ratio']:>8.1f}{prof_str:>6}  "
                   f"Donch={cfg.donchian_bars} TP={cfg.take_profit_pts} SL={cfg.stop_loss_pts} "
-                  f"HTP={cfg.half_tp_ratio} Tgt={cfg.daily_target_pct}")
+                  f"HTP={cfg.half_tp_ratio} Tgt={cfg.daily_target_pct} "
+                  f"Loss={cfg.daily_loss_pct} PEB={cfg.pending_expire_bars}")
+        print(f"\n  Gate priority: prof_count desc -> NP/DD desc. "
+              f"Winner = highest prof_count first, NP/DD tie-break.")
 
         winner = ranked[0]["cfg"]
         winner_total_np = ranked[0]["total_np"]

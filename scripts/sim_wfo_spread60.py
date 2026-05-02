@@ -47,48 +47,54 @@ WINDOWS = [
 PREWARM_START = date(2026, 2, 12)
 PREWARM_END   = date(2026, 4, 25)
 
-OUT_DIR = ROOT / "output" / "sim_wfo_s2_apr25"
-SET_OUT = ROOT / "configs" / "sets" / "scalp_v2_s2_sim_apr25.set"
-
-# Asian session — S2 hours
-S2_START_HOUR = 1
-S2_END_HOUR   = 8
+OUT_DIR = ROOT / "output" / "sim_wfo_spread60_apr25"
+SET_OUT = ROOT / "configs" / "sets" / "scalp_v1_sim_spread60_apr25.set"
 
 
-def build_config_grid(tiny: bool = False) -> list[S1Config]:
-    """S2 (Asian session) sweep — same params as S1 sweep but Asian hours."""
+def build_config_grid(tiny: bool = False, hedge: bool = False) -> list[S1Config]:
+    """WFO with 60-pt sim spread (conservative live-execution model).
+
+    With 60-pt spread, SL must be > 60 pts (else stops out instantly on entry tick).
+    Wider SL also requires wider TP to maintain attractive R:R.
+    """
     if tiny:
-        donch_vals = (20, 25)
-        tp_vals = (150, 200)
-        sl_vals = (50,)
-        htp_vals = (0.3, 0.6)
-        tgt_vals = (3.0, 6.0)
+        donch_vals = (30, 35)
+        tp_vals = (300, 400)
+        sl_vals = (100,)
+        htp_vals = (0.6,)
+        tgt_vals = (12.0,)
+        loss_vals = (12.0,)
+        peb_vals = (2,)
     else:
-        donch_vals = (15, 20, 25, 30)
-        tp_vals = (100, 150, 200, 250)
-        sl_vals = (50, 75, 100)
-        htp_vals = (0.0, 0.3, 0.6, 0.9)
-        tgt_vals = (3.0, 6.0, 9.0)
+        donch_vals = (25, 30, 35, 40, 45)      # explore wider
+        tp_vals = (200, 300, 400, 500)          # wider TP for better R:R
+        sl_vals = (80, 100, 120, 150, 200)      # MUST exceed 60 spread; sweep wider
+        htp_vals = (0.6,)                       # fixed at known winner
+        tgt_vals = (9.0, 12.0, 15.0)            # around prior winners
+        loss_vals = (8.0, 12.0, 18.0)           # daily loss cap variants
+        peb_vals = (2,)                          # fixed at winner
     grid = []
     for donch in donch_vals:
         for tp in tp_vals:
             for sl in sl_vals:
                 for htp in htp_vals:
                     for tgt in tgt_vals:
-                        grid.append(S1Config(
-                            risk_pct=RISK_PCT,
-                            donchian_bars=donch,
-                            take_profit_pts=tp,
-                            stop_loss_pts=sl,
-                            half_tp_ratio=htp,
-                            pending_expire_bars=2,
-                            start_hour=S2_START_HOUR,
-                            end_hour=S2_END_HOUR,
-                            daily_target_pct=tgt,
-                            daily_loss_pct=12.0,
-                            block_fri_pm=True,
-                            hedge_mode=False,
-                        ))
+                        for loss in loss_vals:
+                            for peb in peb_vals:
+                                grid.append(S1Config(
+                                    risk_pct=RISK_PCT,
+                                    donchian_bars=donch,
+                                    take_profit_pts=tp,
+                                    stop_loss_pts=sl,
+                                    half_tp_ratio=htp,
+                                    pending_expire_bars=peb,
+                                    start_hour=14,
+                                    end_hour=22,
+                                    daily_target_pct=tgt,
+                                    daily_loss_pct=loss,
+                                    block_fri_pm=True,
+                                    hedge_mode=hedge,
+                                ))
     return grid
 
 
@@ -97,13 +103,15 @@ def _to_utc(d: date) -> datetime:
 
 
 def _param_key(row) -> tuple:
-    """Key used for cross-window robust matching."""
+    """Key used for cross-window robust matching (Phase A: includes peb + loss)."""
     return (
         int(row["donchian_bars"]),
         int(row["take_profit_pts"]),
         int(row["stop_loss_pts"]),
         round(float(row["half_tp_ratio"]), 2),
         round(float(row["daily_target_pct"]), 2),
+        round(float(row["daily_loss_pct"]), 2),
+        int(row["pending_expire_bars"]),
     )
 
 
@@ -128,14 +136,14 @@ def print_top5(df: pd.DataFrame, label: str):
     profitable = df[(df["net_profit"] > 0) & (df["trades"] >= 10) & df["error"].isna()]
     top = profitable.sort_values("recovery_factor", ascending=False).head(5)
     print(f"\n  {label}: top-5 by Recovery Factor (of {len(profitable)} profitable):")
-    print(f"    {'NP':>10}  {'ROI%':>7}  {'PF':>6}  {'DD':>6}  {'Tr':>4}  {'RF':>8}  Donch  TP  SL  HTP  Tgt")
+    print(f"    {'NP':>10}  {'ROI%':>7}  {'PF':>6}  {'DD':>6}  {'Tr':>4}  {'RF':>8}  Donch  TP  SL  HTP  Tgt  Loss  PEB")
     for _, r in top.iterrows():
         print(f"    {r['net_profit']:>+10,.2f}  {r['return_pct']:>+6.1f}%  "
               f"{r['profit_factor']:>6.2f}  "
               f"{r['drawdown_pct']:>5.1f}%  {int(r['trades']):>4}  {r['recovery_factor']:>8.1f}  "
               f"{int(r['donchian_bars']):>5}  {int(r['take_profit_pts']):>3}  "
               f"{int(r['stop_loss_pts']):>3}  {r['half_tp_ratio']:>4.1f}  "
-              f"{int(r['daily_target_pct']):>3}")
+              f"{int(r['daily_target_pct']):>3}  {int(r['daily_loss_pct']):>4}  {int(r['pending_expire_bars']):>3}")
 
 
 def select_robust(per_window: dict[str, pd.DataFrame], top_n: int = 20) -> list[S1Config]:
@@ -185,16 +193,16 @@ def select_robust(per_window: dict[str, pd.DataFrame], top_n: int = 20) -> list[
             take_profit_pts=int(r["take_profit_pts"]),
             stop_loss_pts=int(r["stop_loss_pts"]),
             half_tp_ratio=round(float(r["half_tp_ratio"]), 2),
-            pending_expire_bars=2,
-            start_hour=S2_START_HOUR,
-            end_hour=S2_END_HOUR,
+            pending_expire_bars=int(r["pending_expire_bars"]),
+            start_hour=14,
+            end_hour=22,
             daily_target_pct=float(r["daily_target_pct"]),
-            daily_loss_pct=12.0,
+            daily_loss_pct=float(r["daily_loss_pct"]),
             block_fri_pm=True,
-            hedge_mode=False,
+            hedge_mode=bool(r["hedge_mode"]),
         ))
         print(f"    #{len(candidates)} Donch={k[0]} TP={k[1]} SL={k[2]} HTP={k[3]} "
-              f"Tgt={k[4]}  "
+              f"Tgt={k[4]} Loss={k[5]} PEB={k[6]}  "
               f"(windows={info['windows']}  total_NP={info['total_np']:+,.0f})")
     return candidates
 
@@ -245,45 +253,26 @@ def rank_oos(candidates: list[S1Config], oos_per_window: dict[str, pd.DataFrame]
 
 
 def write_setfile(cfg: S1Config, path: Path):
-    """Write a Scalper_v2 setfile with S1 disabled, S2 enabled (the WFO winner)."""
     c = asdict(cfg)
     lines = [
-        # S1 disabled
-        f"_S1_Enabled=false",
-        f"_S1_Magic=2000||2000||1||2000||2000||N",
+        f"_Magic=2000||2000||1||2000||2000||N",
+        f"_EntryTF=5||5||1||5||5||N",
+        f"_BlockFriPM={'true' if c['block_fri_pm'] else 'false'}",
+        f"_S1_Enabled=true",
         f"_S1_Comment=DT818_S1",
-        f"_S1_EntryTF=5||5||1||5||5||N",
-        f"_S1_RiskPct=1.0||1.0||1||1.0||1.0||N",
-        f"_S1_DonchianBars=30||30||1||30||30||N",
-        f"_S1_TakeProfit=150||150||1||150||150||N",
-        f"_S1_StopLoss=50||50||1||50||50||N",
-        f"_S1_HalfTP_Ratio=0.6||0.6||1||0.6||0.6||N",
-        f"_S1_PendingExpireBars=2||2||1||2||2||N",
-        f"_S1_TradeStartHour=14||14||1||14||14||N",
-        f"_S1_TradeEndHour=22||22||1||22||22||N",
-        f"_S1_DailyTargetPct=9.0||9.0||1||9.0||9.0||N",
-        f"_S1_DailyLossPct=12.0||12.0||1||12.0||12.0||N",
+        f"_S1_RiskPct={c['risk_pct']}||{c['risk_pct']}||1||{c['risk_pct']}||{c['risk_pct']}||N",
+        f"_S1_DonchianBars={c['donchian_bars']}||{c['donchian_bars']}||1||{c['donchian_bars']}||{c['donchian_bars']}||N",
+        f"_S1_TakeProfit={c['take_profit_pts']}||{c['take_profit_pts']}||1||{c['take_profit_pts']}||{c['take_profit_pts']}||N",
+        f"_S1_StopLoss={c['stop_loss_pts']}||{c['stop_loss_pts']}||1||{c['stop_loss_pts']}||{c['stop_loss_pts']}||N",
+        f"_S1_HalfTP_Ratio={c['half_tp_ratio']}||{c['half_tp_ratio']}||1||{c['half_tp_ratio']}||{c['half_tp_ratio']}||N",
+        f"_S1_PendingExpireBars={c['pending_expire_bars']}||{c['pending_expire_bars']}||1||{c['pending_expire_bars']}||{c['pending_expire_bars']}||N",
+        f"_S1_TradeStartHour={c['start_hour']}||{c['start_hour']}||1||{c['start_hour']}||{c['start_hour']}||N",
+        f"_S1_TradeEndHour={c['end_hour']}||{c['end_hour']}||1||{c['end_hour']}||{c['end_hour']}||N",
+        f"_S1_DailyTargetPct={c['daily_target_pct']}||{c['daily_target_pct']}||1||{c['daily_target_pct']}||{c['daily_target_pct']}||N",
+        f"_S1_DailyLossPct={c['daily_loss_pct']}||{c['daily_loss_pct']}||1||{c['daily_loss_pct']}||{c['daily_loss_pct']}||N",
         f"_S1_DailyMaxWins=0||0||1||0||0||N",
         f"_S1_DailyMaxLosses=0||0||1||0||0||N",
-        f"_S1_HedgeMode=false",
-        # S2 enabled (WFO winner)
-        f"_S2_Enabled=true",
-        f"_S2_Magic=2001||2001||1||2001||2001||N",
-        f"_S2_Comment=DT818_S2",
-        f"_S2_EntryTF=5||5||1||5||5||N",
-        f"_S2_RiskPct={c['risk_pct']}||{c['risk_pct']}||1||{c['risk_pct']}||{c['risk_pct']}||N",
-        f"_S2_DonchianBars={c['donchian_bars']}||{c['donchian_bars']}||1||{c['donchian_bars']}||{c['donchian_bars']}||N",
-        f"_S2_TakeProfit={c['take_profit_pts']}||{c['take_profit_pts']}||1||{c['take_profit_pts']}||{c['take_profit_pts']}||N",
-        f"_S2_StopLoss={c['stop_loss_pts']}||{c['stop_loss_pts']}||1||{c['stop_loss_pts']}||{c['stop_loss_pts']}||N",
-        f"_S2_HalfTP_Ratio={c['half_tp_ratio']}||{c['half_tp_ratio']}||1||{c['half_tp_ratio']}||{c['half_tp_ratio']}||N",
-        f"_S2_PendingExpireBars={c['pending_expire_bars']}||{c['pending_expire_bars']}||1||{c['pending_expire_bars']}||{c['pending_expire_bars']}||N",
-        f"_S2_TradeStartHour={c['start_hour']}||{c['start_hour']}||1||{c['start_hour']}||{c['start_hour']}||N",
-        f"_S2_TradeEndHour={c['end_hour']}||{c['end_hour']}||1||{c['end_hour']}||{c['end_hour']}||N",
-        f"_S2_DailyTargetPct={c['daily_target_pct']}||{c['daily_target_pct']}||1||{c['daily_target_pct']}||{c['daily_target_pct']}||N",
-        f"_S2_DailyLossPct={c['daily_loss_pct']}||{c['daily_loss_pct']}||1||{c['daily_loss_pct']}||{c['daily_loss_pct']}||N",
-        f"_S2_DailyMaxWins=0||0||1||0||0||N",
-        f"_S2_DailyMaxLosses=0||0||1||0||0||N",
-        f"_S2_HedgeMode={'true' if c['hedge_mode'] else 'false'}",
+        f"_S1_HedgeMode={'true' if c['hedge_mode'] else 'false'}",
     ]
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
@@ -309,6 +298,8 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--tiny", action="store_true",
                     help="Small grid (16 configs) for end-to-end sanity (~15 min)")
+    ap.add_argument("--hedge", action="store_true",
+                    help="Run with hedge_mode=True (mirror SellLimit/BuyLimit at each breakout)")
     ap.add_argument("--out-dir", default=None,
                     help="Override output dir (caches + setfile)")
     args = ap.parse_args()
@@ -317,14 +308,14 @@ def main():
     if args.out_dir:
         OUT_DIR = Path(args.out_dir)
     if args.tiny:
-        OUT_DIR = ROOT / "output" / "sim_wfo_tiny"
-        SET_OUT = ROOT / "configs" / "sets" / "scalp_v1_sim_tiny.set"
+        OUT_DIR = ROOT / "output" / "sim_wfo_phase_a_tiny"
+        SET_OUT = ROOT / "configs" / "sets" / "scalp_v1_sim_phase_a_tiny.set"
 
     try:
         OUT_DIR.mkdir(parents=True, exist_ok=True)
         print("=" * 72)
         mode = "TINY (sanity)" if args.tiny else "FULL (576 combos)"
-        print(f"  PYSIM WFO S2 Asian (1-8 UTC) — Apr 25   [{mode}]")
+        print(f"  PYSIM WFO (Apr 18) — 3 windows, sim for IS + OOS   [{mode}]")
         print("=" * 72)
 
         m = symbol_meta(SYMBOL)
@@ -346,8 +337,9 @@ def main():
         print(f"  Pre-warm done in {time.time()-t0:.1f}s")
 
         # Build grid
-        configs = build_config_grid(tiny=args.tiny)
-        print(f"\n  Config grid: {len(configs)} combos")
+        configs = build_config_grid(tiny=args.tiny, hedge=args.hedge)
+        hedge_label = " HEDGE=ON" if args.hedge else ""
+        print(f"\n  Config grid: {len(configs)} combos{hedge_label}")
 
         # Phase A: IS sweep per window
         print("\n" + "=" * 72)
@@ -393,7 +385,8 @@ def main():
             print(f"  {rank:<5}{row['total_np']:>+14,.2f}{total_ret_pct:>+7.1f}%"
                   f"{row['avg_dd']:>7.1f}%{row['np_dd_ratio']:>8.1f}{flag:>9}  "
                   f"Donch={cfg.donchian_bars} TP={cfg.take_profit_pts} SL={cfg.stop_loss_pts} "
-                  f"HTP={cfg.half_tp_ratio} Tgt={cfg.daily_target_pct}")
+                  f"HTP={cfg.half_tp_ratio} Tgt={cfg.daily_target_pct} "
+                  f"Loss={cfg.daily_loss_pct} PEB={cfg.pending_expire_bars}")
 
         winner = ranked[0]["cfg"]
         winner_total_np = ranked[0]["total_np"]

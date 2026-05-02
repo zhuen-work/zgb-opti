@@ -222,11 +222,12 @@ def run_oos_phase(candidates: list[S1Config], meta: SymbolMeta) -> dict[str, pd.
 
 
 def rank_oos(candidates: list[S1Config], oos_per_window: dict[str, pd.DataFrame]):
-    """Compute per-candidate OOS totals, return ranked list."""
+    """Compute per-candidate OOS totals, rank by NP/avg-DD ratio."""
     rows = []
     for i, cfg in enumerate(candidates):
         total_np = 0.0
         total_tr = 0
+        dds = []
         all_prof = True
         per_win = []
         for win_label, _, _, _, _ in WINDOWS:
@@ -234,13 +235,17 @@ def rank_oos(candidates: list[S1Config], oos_per_window: dict[str, pd.DataFrame]
             per_win.append((win_label, r))
             total_np += float(r["net_profit"])
             total_tr += int(r["trades"])
+            dds.append(float(r["drawdown_pct"]))
             if r["net_profit"] <= 0:
                 all_prof = False
+        avg_dd = sum(dds) / len(dds) if dds else 0.5
+        np_dd_ratio = total_np / max(avg_dd, 0.5)
         rows.append({
             "cfg": cfg, "total_np": total_np, "total_tr": total_tr,
             "all_prof": all_prof, "per_win": per_win,
+            "avg_dd": avg_dd, "np_dd_ratio": np_dd_ratio,
         })
-    rows.sort(key=lambda x: (x["all_prof"], x["total_np"]), reverse=True)
+    rows.sort(key=lambda x: (x["all_prof"], x["np_dd_ratio"]), reverse=True)
     return rows
 
 
@@ -364,7 +369,7 @@ def main():
 
         # Phase D: Final ranking
         print("\n" + "=" * 72)
-        print("  PHASE D: FINAL RANKING (by total OOS NP)")
+        print("  PHASE D: FINAL RANKING (by NP/AvgDD ratio)")
         print("=" * 72)
         ranked = rank_oos(candidates, oos_per_window)
         print(f"\n  {'Rank':<5}{'Total OOS NP':>15}{'ROI%':>9}{'All Prof':>10}  Params")
@@ -374,7 +379,8 @@ def main():
             # Return % measured against initial deposit per OOS run
             # (each OOS window starts from DEPOSIT, 3 independent runs)
             total_ret_pct = row["total_np"] / (DEPOSIT * len(WINDOWS)) * 100.0
-            print(f"  {rank:<5}{row['total_np']:>+15,.2f}{total_ret_pct:>+7.1f}%{flag:>10}  "
+            print(f"  {rank:<5}{row['total_np']:>+14,.2f}{total_ret_pct:>+7.1f}%"
+                  f"{row['avg_dd']:>7.1f}%{row['np_dd_ratio']:>8.1f}{flag:>9}  "
                   f"Donch={cfg.donchian_bars} TP={cfg.take_profit_pts} SL={cfg.stop_loss_pts} "
                   f"HTP={cfg.half_tp_ratio} Tgt={cfg.daily_target_pct} "
                   f"Loss={cfg.daily_loss_pct} PEB={cfg.pending_expire_bars}")

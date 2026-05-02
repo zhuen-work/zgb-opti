@@ -1,0 +1,112 @@
+; DT818_pro - Combined FBO + ORB + LSFVG, ALL 4.5% risk (AGGRESSIVE), Apr 25 WFO
+; Next WFO: May 9 2026
+;
+; ** WARNING: 25-30% sim DD. Realistic live max DD 35-50%. Make sure tolerable. **
+;
+; 4 streams sharing single $10k account (4.5% risk per trade):
+;   FBO S1 (M30 fractal)  magic 1000 cmt FBO_A
+;   FBO S2 (M15 fractal)  magic 1000 cmt FBO_B
+;   ORB    (M5  session)  magic 2000 cmt ORB
+;   LSFVG  (M15 SMC)      magic 3000 cmt LSFVG
+;
+; Daily caps are STREAM-LOCAL (each stream tracks its own magic, locks only itself):
+;   FBO   : DISABLED (FBO was WFO'd unconstrained)
+;   ORB   : 40.5% target / 27.0% loss  (4.5x ORB WFO baseline 9/6 — keeps trades-to-cap constant)
+;   LSFVG : DISABLED (sparse strategy, caps would prematurely lock)
+;
+; Sanity ET (Feb 14 -> Apr 25, $10k, deal-merge on shared account):
+;   COMBINED: NP +$46,113 (+461% ROI) / DD 25.5% / NP/DD 2.58 / 609 trades
+;     FBO_S1 contrib: +$3,250  (27 trades)
+;     FBO_S2 contrib: +$13,216 (406 trades)
+;     ORB    contrib: +$26,848 (144 trades)
+;     LSFVG  contrib: +$2,799  (32 trades)
+;
+; vs 3% variant: ROI +167pp / DD +6.9pp / NP/DD efficiency -25% / scale 1.57x
+; The 3% setfile (dt818_pro_3pct_apr25_reopt_may9.set) is recommended for safer accounts.
+
+; ===== Global account =====
+_CapitalProtectionAmount=0.0||0.0||1||0.0||0.0||N
+_RiskPct=4.5||4.5||1||4.5||4.5||N
+_LotMode=1||1||1||1||1||N
+TierBase=2000||2000||1||2000||2000||N
+LotStep=0.01||0.01||1||0.01||0.01||N
+
+; ===== FBO (magic 1000) =====
+_FBO_Magic=1000||1000||1||1000||1000||N
+_PendingExpireBars1=2||2||1||2||2||N
+_PendingExpireBars2=4||4||1||4||4||N
+_FBO_DailyTargetPct=0.0||0.0||1||0.0||0.0||N
+_FBO_DailyLossPct=0.0||0.0||1||0.0||0.0||N
+
+; FBO Stream 1 (M30)
+_FBO1=1||1||1||1||1||N
+_FBO1_Comment=FBO_A
+_FBO1_TF=30||30||1||30||30||N
+_FBO1_TP=25000||25000||1||25000||25000||N
+_FBO1_SL=10000||10000||1||10000||10000||N
+_FBO1_Bars=8||8||1||8||8||N
+_FBO1_SMA=10||10||1||10||10||N
+_FBO1_HalfTP=0.3||0.3||1||0.3||0.3||N
+
+; FBO Stream 2 (M15)
+_FBO2=1||1||1||1||1||N
+_FBO2_Comment=FBO_B
+_FBO2_TF=15||15||1||15||15||N
+_FBO2_TP=4000||4000||1||4000||4000||N
+_FBO2_SL=4000||4000||1||4000||4000||N
+_FBO2_Bars=8||8||1||8||8||N
+_FBO2_SMA=50||50||1||50||50||N
+_FBO2_HalfTP=0.6||0.6||1||0.6||0.6||N
+
+; ===== ORB (magic 2000) =====
+_ORB_Enabled=true
+_ORB_Magic=2000||2000||1||2000||2000||N
+_ORB_Comment=ORB
+_BrokerGMTOffsetHours=3||3||1||3||3||N
+_ORB_LDN_Enabled=true
+_ORB_LDN_StartHour=7||7||1||7||7||N
+_ORB_NY_Enabled=true
+_ORB_NY_StartHour=13||13||1||13||13||N
+_ORB_RangeMinutes=90||90||1||90||90||N
+_ORB_BufferPts=0||0||1||0||0||N
+_ORB_MinRangePts=200||200||1||200||200||N
+_ORB_MaxRangePts=5000||5000||1||5000||5000||N
+_ORB_FixedSL_Pts=350||350||1||350||350||N
+_ORB_RR_Ratio=2.0||2.0||1||2.0||2.0||N
+_ORB_HalfTP_Ratio=0.0||0.0||1||0.0||0.0||N
+_ORB_PendingExpireMinutes=240||240||1||240||240||N
+_ORB_DailyTargetPct=13.5||13.5||1||13.5||13.5||N
+_ORB_DailyLossPct=9.0||9.0||1||9.0||9.0||N
+
+; ===== LSFVG (magic 3000) =====
+_LSFVG_Enabled=true
+_LSFVG_Magic=3000||3000||1||3000||3000||N
+_LSFVG_Comment=LSFVG
+_LSFVG_SignalTF=15||15||1||15||15||N
+_LSFVG_LookbackBars=10||10||1||10||10||N
+_LSFVG_MinFVGPts=20||20||1||20||20||N
+_LSFVG_MaxFVGPts=5000||5000||1||5000||5000||N
+_LSFVG_SweepBufferPts=30||30||1||30||30||N
+_LSFVG_RR_Ratio=2.0||2.0||1||2.0||2.0||N
+_LSFVG_HalfTP_Ratio=0.5||0.5||1||0.5||0.5||N
+_LSFVG_PendingExpireBars=4||4||1||4||4||N
+_LSFVG_UseEMAFilter=false
+_LSFVG_EMA_Period=50||50||1||50||50||N
+_LSFVG_DailyTargetPct=0.0||0.0||1||0.0||0.0||N
+_LSFVG_DailyLossPct=0.0||0.0||1||0.0||0.0||N
+
+; ===== EMAPullback (magic 4000) — W70 WFO winner =====
+_EMP_Enabled=true
+_EMP_Magic=4000||4000||1||4000||4000||N
+_EMP_Comment=EMP
+_EMP_SignalTF=15||15||1||15||15||N
+_EMP_EMA_Period=50||50||1||50||50||N
+_EMP_LookbackBars=3||3||1||3||3||N
+_EMP_PullbackBandPts=150||150||1||150||150||N
+_EMP_EntryBufferPts=0||0||1||0||0||N
+_EMP_SLBufferPts=30||30||1||30||30||N
+_EMP_RR_Ratio=2.0||2.0||1||2.0||2.0||N
+_EMP_HalfTP_Ratio=0.0||0.0||1||0.0||0.0||N
+_EMP_PendingExpireBars=3||3||1||3||3||N
+_EMP_DailyTargetPct=0.0||0.0||1||0.0||0.0||N
+_EMP_DailyLossPct=9.0||9.0||1||9.0||9.0||N
