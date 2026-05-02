@@ -48,7 +48,7 @@ WINDOWS = [
 PREWARM_START = date(2026, 2, 12)
 PREWARM_END   = date(2026, 4, 25)
 
-OUT_DIR = ROOT / "output" / "sim_wfo_orb_spread70_dt818_pro"
+OUT_DIR = ROOT / "output" / "wfo_orb_spread70"
 SET_OUT = ROOT / "configs" / "sets" / "dt818_pro_orb_spread70_apr25_reopt_may9.set"
 
 

@@ -49,7 +49,7 @@ WINDOWS = [
 PREWARM_START = date(2026, 2, 12)
 PREWARM_END   = date(2026, 4, 25)
 
-OUT_DIR = ROOT / "output" / "sim_wfo_ema_pullback_spread70"
+OUT_DIR = ROOT / "output" / "wfo_ema_pullback"
 
 
 def build_grid(tiny=False) -> list[EMAPullbackConfig]:
