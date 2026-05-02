@@ -96,7 +96,7 @@ _LSFVG_DailyTargetPct=0.0||0.0||1||0.0||0.0||N
 _LSFVG_DailyLossPct=0.0||0.0||1||0.0||0.0||N
 
 ; ===== EMAPullback (magic 4000) — W70 WFO winner =====
-_EMP_Enabled=true
+_EMP_Enabled=false
 _EMP_Magic=4000||4000||1||4000||4000||N
 _EMP_Comment=EMP
 _EMP_SignalTF=15||15||1||15||15||N
