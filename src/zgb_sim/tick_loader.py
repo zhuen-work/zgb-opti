@@ -229,16 +229,37 @@ def load_bars(symbol: str, tf: str, start: datetime, end: datetime) -> pd.DataFr
 
 
 def symbol_meta(symbol: str) -> dict:
-    """Fetch relevant symbol metadata (point, tick size/value, stops level, lot limits)."""
+    """Fetch relevant symbol metadata. Caches to JSON for offline use.
+    Falls back to known XAUUSD/Vantage defaults when MT5 unavailable.
+    """
+    import json
+    cache_path = CACHE_DIR / f"meta_{symbol}.json"
+    if cache_path.exists():
+        return json.loads(cache_path.read_text())
+
+    # XAUUSD on Vantage — known stable defaults (matches mt5.symbol_info() output)
+    XAUUSD_FALLBACK = {
+        "point": 0.01, "digits": 2,
+        "tick_size": 0.01, "tick_value": 1.0,
+        "stops_level": 0,
+        "volume_min": 0.01, "volume_max": 100.0, "volume_step": 0.01,
+    }
+
     import MetaTrader5 as mt5
     if not mt5.initialize():
+        # Fallback: use known XAUUSD defaults if MT5 unavailable
+        if symbol == "XAUUSD":
+            cache_path.parent.mkdir(parents=True, exist_ok=True)
+            cache_path.write_text(json.dumps(XAUUSD_FALLBACK, indent=2))
+            print(f"  [symbol_meta] MT5 unavailable, using cached XAUUSD defaults.")
+            return XAUUSD_FALLBACK
         raise RuntimeError("MT5 init failed")
     try:
         mt5.symbol_select(symbol, True)
         info = mt5.symbol_info(symbol)
         if info is None:
             raise RuntimeError(f"No symbol info for {symbol}")
-        return {
+        meta_dict = {
             "point": info.point,
             "digits": info.digits,
             "tick_size": info.trade_tick_size,
@@ -249,6 +270,9 @@ def symbol_meta(symbol: str) -> dict:
             "volume_step": info.volume_step,
             "contract_size": info.trade_contract_size,
         }
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
+        cache_path.write_text(json.dumps(meta_dict, indent=2))
+        return meta_dict
     finally:
         mt5.shutdown()
         kill_mt5_terminal()  # user rule: never leave MT5 running

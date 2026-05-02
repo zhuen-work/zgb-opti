@@ -40,16 +40,12 @@ N_WORKERS = 6
 SIGNAL_TF = "M5"
 PENDING_EXPIRE_MIN = 240  # match live DT818_pro setfile
 
-WINDOWS = [
-    ("W1", date(2026, 2, 14), date(2026, 3, 14), date(2026, 3, 14), date(2026, 3, 28)),
-    ("W2", date(2026, 2, 28), date(2026, 3, 28), date(2026, 3, 28), date(2026, 4, 11)),
-    ("W3", date(2026, 3, 14), date(2026, 4, 11), date(2026, 4, 11), date(2026, 4, 25)),
-]
-PREWARM_START = date(2026, 2, 12)
-PREWARM_END   = date(2026, 4, 25)
+from zgb_sim.wfo_helpers import WINDOWS_MAY2 as WINDOWS, rank_with_p0, print_phase_d_with_p0, select_winner_with_p0
 
-OUT_DIR = ROOT / "output" / "wfo_orb_spread70"
-SET_OUT = ROOT / "configs" / "sets" / "dt818_pro_orb_spread70_apr25_reopt_may9.set"
+PREWARM_START = date(2026, 2, 12)
+PREWARM_END   = date(2026, 5,  1)
+
+OUT_DIR = ROOT / "output" / "wfo_orb_spread70_may2"
 
 
 def build_config_grid(tiny=False) -> list[ORBConfig]:
@@ -244,10 +240,10 @@ def write_setfile(cfg: ORBConfig, path: Path):
 
 def sanity_et(cfg: ORBConfig, meta: SymbolMeta):
     print("\n" + "=" * 72)
-    print("  SANITY ET (continuous Mar 14 -> Apr 25, $10k, 3% risk, spread=70)")
+    print("  SANITY ET (continuous Mar 14 -> May 2, $10k, 3% risk, spread=70)")
     print("=" * 72)
     full_start = _to_utc(date(2026, 3, 14))
-    full_end = _to_utc(date(2026, 4, 25))
+    full_end = _to_utc(date(2026, 5, 1))
     ticks = load_ticks(SYMBOL, full_start, full_end)
     m1 = load_bars(SYMBOL, "M1", full_start, full_end)
     m5 = load_bars(SYMBOL, "M5", full_start, full_end)
@@ -298,19 +294,23 @@ def main():
                 print(f"    #{i+1} NP={r['net_profit']:+,.2f} ({r['return_pct']:+.1f}%)  "
                       f"PF={r['profit_factor']:.2f}  DD={r['drawdown_pct']:.1f}%  Tr={int(r['trades'])}")
 
-        print("\n=== PHASE D: Final Ranking ===")
-        ranked = rank_oos(candidates, oos_per)
-        for rank, row in enumerate(ranked, 1):
-            cfg = row["cfg"]
-            print(f"  #{rank}  NP=${row['total_np']:+,.0f}  AvgDD={row['avg_dd']:.1f}%  "
-                  f"NP/DD={row['np_dd_ratio']:+.0f}  Prof={row['prof_count']}/3  "
-                  f"Range={cfg.range_minutes} FixSL={cfg.fixed_sl_pts} "
-                  f"RR={cfg.rr_ratio} HTP={cfg.half_tp_ratio} "
-                  f"Tgt={cfg.daily_target_pct}% Loss={cfg.daily_loss_pct}%")
+        ranked = rank_with_p0(candidates, oos_per, WINDOWS, decay_threshold=-0.25)
+        print_phase_d_with_p0(ranked, "ORB")
 
-        winner = ranked[0]["cfg"]
-        write_setfile(winner, SET_OUT)
-        print(f"\n  Setfile: {SET_OUT}")
+        winner_row = select_winner_with_p0(ranked)
+        if winner_row is None:
+            print(f"\n  WARNING: 0 candidates passed P0. Using fallback (top by ranking).")
+            winner_row = ranked[0]
+        winner = winner_row["cfg"]
+        print(f"\n  WINNER: Range={winner.range_minutes} FixSL={winner.fixed_sl_pts} "
+              f"RR={winner.rr_ratio} HTP={winner.half_tp_ratio} "
+              f"Tgt={winner.daily_target_pct}% Loss={winner.daily_loss_pct}%  "
+              f"slope={winner_row['slope']:+.1%}  P0={'PASS' if winner_row['p0_pass'] else 'FAIL'}")
+        # Persist winner config to a JSON file for downstream Phase E
+        import json
+        winner_path = OUT_DIR / "winner.json"
+        winner_path.write_text(json.dumps(asdict(winner), indent=2, default=str), encoding="utf-8")
+        print(f"  Winner persisted: {winner_path}")
         sanity_et(winner, meta)
         print("\n=== Done ===")
     finally:

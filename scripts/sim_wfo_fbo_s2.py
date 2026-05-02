@@ -1,24 +1,22 @@
-"""WFO for EMAPullback at 70pt spread, 3% risk, $10k.
+"""WFO for FBO_S2 (M15 fractal) at 70pt spread, 3% risk, $10k.
 
-Smoke winner anchor: EMA=50, Look=3, Band=100, SLBuf=50, RR=2.0 -> NP +$4,999, NP/DD 1.86.
-This WFO finds robust params around that point.
+Current live params (anchor):
+  TF=15 (M15), TP=4,000, SL=4,000, Bars=8, SMA=50, HalfTP=0.6, expire=4 bars
 
-Grid (768 combos):
-  ema_period:       21, 34, 50, 100        (4)
-  lookback_bars:    3, 5                    (2)
-  pullback_band_pts: 50, 100, 150           (3)
-  sl_buffer_pts:    30, 50, 100             (3)
-  rr_ratio:         1.5, 2.0, 2.5           (3)
-  daily_target_pct: 0, 9                    (2) — 0 disables to test caps-off
-  daily_loss_pct:   0, 6                    (2)
-  -> 4*2*3*3*3*2*2 = 864
-Window: Feb 14 -> Apr 25, 3 IS/OOS folds.
+Grid (~243 combos × 4 windows = 972 sims):
+  take_profit_pts:  3000, 4000, 5000           (3)
+  stop_loss_pts:    3000, 4000, 5000           (3)
+  fractal_bars:     6, 8, 10                   (3)
+  sma_period:       30, 50, 80                 (3)
+  half_tp_ratio:    0.0, 0.6                   (2)... actually 0.3, 0.5, 0.6 (3)
+  -> 3*3*3*3*3 = 243
 """
 from __future__ import annotations
 
 import argparse
 import sys
 import time
+import json
 from dataclasses import asdict
 from datetime import date, datetime, timezone
 from pathlib import Path
@@ -30,9 +28,10 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from zgb_sim.tick_loader import symbol_meta, kill_mt5_terminal, load_ticks, load_bars
 from zgb_sim.scalper_v1 import SymbolMeta
-from zgb_sim.ema_pullback import EMAPullbackConfig
-from zgb_sim.ema_pullback_fast import simulate_fast as ep_simulate
-from zgb_sim.sweep_ema_pullback import run_sweep
+from zgb_sim.fbo_s1 import FBOS1Config
+from zgb_sim.fbo_s1_fast import simulate_fast as fbo_simulate
+from zgb_sim.sweep_fbo import run_sweep
+from zgb_sim.wfo_helpers import WINDOWS_MAY2 as WINDOWS, rank_with_p0, print_phase_d_with_p0, select_winner_with_p0
 
 
 SYMBOL = "XAUUSD"
@@ -40,49 +39,39 @@ RISK_PCT = 3.0
 DEPOSIT = 10_000.0
 N_WORKERS = 6
 SIGNAL_TF = "M15"
-
-from zgb_sim.wfo_helpers import WINDOWS_MAY2 as WINDOWS, rank_with_p0, print_phase_d_with_p0, select_winner_with_p0
+COMMENT = "FBO_B"
+PENDING_EXPIRE_BARS = 4
 
 PREWARM_START = date(2026, 2, 12)
 PREWARM_END   = date(2026, 5,  1)
 
-OUT_DIR = ROOT / "output" / "wfo_ema_pullback_may2"
+OUT_DIR = ROOT / "output" / "wfo_fbo_s2_may2"
 
 
-def build_grid(tiny=False) -> list[EMAPullbackConfig]:
+def build_grid(tiny=False) -> list[FBOS1Config]:
     if tiny:
-        return [EMAPullbackConfig(
-            risk_pct=RISK_PCT, signal_tf_minutes=15, ema_period=50,
-            lookback_bars=3, pullback_band_pts=100,
-            entry_buffer_pts=0, sl_buffer_pts=50,
-            rr_ratio=2.0, half_tp_ratio=0.0,
-            pending_expire_bars=3,
-            daily_target_pct=0.0, daily_loss_pct=0.0,
-            comment="EMAPullback",
+        return [FBOS1Config(
+            risk_pct=RISK_PCT, fractal_bars=8, take_profit_pts=4_000,
+            stop_loss_pts=4_000, half_tp_ratio=0.6, sma_period=50,
+            pending_expire_bars=PENDING_EXPIRE_BARS, signal_tf_minutes=15, comment=COMMENT,
         )]
     grid = []
-    for ema_p in (21, 34, 50, 100):
-        for look in (3, 5):
-            for band in (50, 100, 150):
-                for sl_buf in (30, 50, 100):
-                    for rr in (1.5, 2.0, 2.5):
-                        for tgt in (0.0, 9.0):
-                            for loss in (0.0, 6.0):
-                                grid.append(EMAPullbackConfig(
-                                    risk_pct=RISK_PCT,
-                                    signal_tf_minutes=15,
-                                    ema_period=ema_p,
-                                    lookback_bars=look,
-                                    pullback_band_pts=band,
-                                    entry_buffer_pts=0,
-                                    sl_buffer_pts=sl_buf,
-                                    rr_ratio=rr,
-                                    half_tp_ratio=0.0,
-                                    pending_expire_bars=3,
-                                    daily_target_pct=tgt,
-                                    daily_loss_pct=loss,
-                                    comment="EMAPullback",
-                                ))
+    for tp in (3000, 4000, 5000):
+        for sl in (3000, 4000, 5000):
+            for bars in (6, 8, 10):
+                for sma in (30, 50, 80):
+                    for htp in (0.3, 0.5, 0.6):
+                        grid.append(FBOS1Config(
+                            risk_pct=RISK_PCT,
+                            fractal_bars=bars,
+                            take_profit_pts=tp,
+                            stop_loss_pts=sl,
+                            half_tp_ratio=htp,
+                            sma_period=sma,
+                            pending_expire_bars=PENDING_EXPIRE_BARS,
+                            signal_tf_minutes=15,
+                            comment=COMMENT,
+                        ))
     return grid
 
 
@@ -91,11 +80,9 @@ def _to_utc(d): return datetime(d.year, d.month, d.day, tzinfo=timezone.utc)
 
 def _param_key(row):
     return (
-        int(row["ema_period"]), int(row["lookback_bars"]),
-        int(row["pullback_band_pts"]), int(row["sl_buffer_pts"]),
-        round(float(row["rr_ratio"]), 2),
-        round(float(row["daily_target_pct"]), 2),
-        round(float(row["daily_loss_pct"]), 2),
+        int(row["take_profit_pts"]), int(row["stop_loss_pts"]),
+        int(row["fractal_bars"]), int(row["sma_period"]),
+        round(float(row["half_tp_ratio"]), 2),
     )
 
 
@@ -117,9 +104,8 @@ def print_top5(df, label):
     for _, r in top.iterrows():
         print(f"    NP=${r['net_profit']:>+8,.0f}  DD={r['drawdown_pct']:>4.1f}%  "
               f"Tr={int(r['trades']):>3}  RF={r['recovery_factor']:>5.0f}  "
-              f"EMA={int(r['ema_period'])} Look={int(r['lookback_bars'])} "
-              f"Band={int(r['pullback_band_pts'])} SL={int(r['sl_buffer_pts'])} "
-              f"RR={r['rr_ratio']} Tgt={r['daily_target_pct']} Loss={r['daily_loss_pct']}")
+              f"TP={int(r['take_profit_pts'])} SL={int(r['stop_loss_pts'])} "
+              f"Bars={int(r['fractal_bars'])} SMA={int(r['sma_period'])} HTP={r['half_tp_ratio']}")
 
 
 def select_robust(per_window, top_n=30, max_candidates=15):
@@ -159,22 +145,17 @@ def select_robust(per_window, top_n=30, max_candidates=15):
     cands = []
     for k, info in unique:
         r = info["sample_row"]
-        cands.append(EMAPullbackConfig(
+        cands.append(FBOS1Config(
             risk_pct=RISK_PCT, signal_tf_minutes=15,
-            ema_period=int(r["ema_period"]),
-            lookback_bars=int(r["lookback_bars"]),
-            pullback_band_pts=int(r["pullback_band_pts"]),
-            entry_buffer_pts=0,
-            sl_buffer_pts=int(r["sl_buffer_pts"]),
-            rr_ratio=float(r["rr_ratio"]),
-            half_tp_ratio=0.0,
-            pending_expire_bars=3,
-            daily_target_pct=float(r["daily_target_pct"]),
-            daily_loss_pct=float(r["daily_loss_pct"]),
-            comment="EMAPullback",
+            take_profit_pts=int(r["take_profit_pts"]),
+            stop_loss_pts=int(r["stop_loss_pts"]),
+            fractal_bars=int(r["fractal_bars"]),
+            sma_period=int(r["sma_period"]),
+            half_tp_ratio=round(float(r["half_tp_ratio"]), 2),
+            pending_expire_bars=PENDING_EXPIRE_BARS,
+            comment=COMMENT,
         ))
-        print(f"    #{len(cands)} EMA={k[0]} Look={k[1]} Band={k[2]} SL={k[3]} "
-              f"RR={k[4]} Tgt={k[5]} Loss={k[6]}  windows={info['windows']}")
+        print(f"    #{len(cands)} TP={k[0]} SL={k[1]} Bars={k[2]} SMA={k[3]} HTP={k[4]}  windows={info['windows']}")
     return cands
 
 
@@ -190,39 +171,19 @@ def run_oos_phase(candidates, meta):
     return per
 
 
-def rank_oos(candidates, oos_per_window):
-    rows = []
-    for i, cfg in enumerate(candidates):
-        total_np = 0.0
-        dds = []
-        prof_count = 0
-        for label, _, _, _, _ in WINDOWS:
-            r = oos_per_window[label].iloc[i]
-            total_np += float(r["net_profit"])
-            dds.append(float(r["drawdown_pct"]))
-            if r["net_profit"] > 0: prof_count += 1
-        avg_dd = sum(dds) / len(dds) if dds else 0.5
-        np_dd = total_np / max(avg_dd, 0.5)
-        rows.append({"cfg": cfg, "total_np": total_np, "prof_count": prof_count,
-                     "avg_dd": avg_dd, "np_dd_ratio": np_dd})
-    rows.sort(key=lambda x: (x["prof_count"], x["np_dd_ratio"]), reverse=True)
-    return rows
-
-
-def sanity_et(cfg: EMAPullbackConfig, meta: SymbolMeta):
-    print("\n" + "=" * 78)
-    print("  SANITY ET (continuous Mar 14 -> Apr 25, $10k, 3% risk, spread=70)")
-    print("=" * 78)
+def sanity_et(cfg: FBOS1Config, meta: SymbolMeta):
+    print("\n" + "=" * 72)
+    print("  SANITY ET FBO_S2 (continuous Mar 14 -> May 2, $10k, 3% risk, spread=70)")
+    print("=" * 72)
     full_start = _to_utc(date(2026, 3, 14))
-    full_end = _to_utc(date(2026, 4, 25))
+    full_end = _to_utc(date(2026, 5, 1))
     ticks = load_ticks(SYMBOL, full_start, full_end)
     m1 = load_bars(SYMBOL, "M1", full_start, full_end)
     m15 = load_bars(SYMBOL, "M15", full_start, full_end)
-    r = ep_simulate(ticks, m15, m1, cfg, meta, initial_balance=DEPOSIT)
+    r = fbo_simulate(ticks, m15, m1, cfg, meta, initial_balance=DEPOSIT)
     days = (full_end - full_start).days
-    print(f"\n  Sanity ({days}d): NP=${r.net_profit:+,.0f}  ROI={r.net_profit/DEPOSIT*100:+.1f}%  "
-          f"DD={r.max_drawdown_pct:.1f}%  Trades={r.trades}  PF={r.profit_factor:.2f}  "
-          f"TP/SL/O={r.tp_count}/{r.sl_count}/{r.other_count}")
+    print(f"  Sanity ({days}d): NP=${r.net_profit:+,.0f}  ROI={r.net_profit/DEPOSIT*100:+.1f}%  "
+          f"DD={r.max_drawdown_pct:.1f}%  Trades={r.trades}  PF={r.profit_factor:.2f}")
 
 
 def main():
@@ -231,9 +192,9 @@ def main():
     args = ap.parse_args()
     try:
         OUT_DIR.mkdir(parents=True, exist_ok=True)
-        print("=" * 84)
         configs = build_grid(tiny=args.tiny)
-        print(f"  PYSIM WFO EMAPullback (3% risk, $10k, spread=70) -- {len(configs)} combos")
+        print("=" * 84)
+        print(f"  PYSIM WFO FBO_S2 (3% risk, $10k, spread=70) -- {len(configs)} combos")
         print("=" * 84)
 
         m = symbol_meta(SYMBOL)
@@ -269,30 +230,22 @@ def main():
                       f"PF={r['profit_factor']:.2f}  DD={r['drawdown_pct']:.1f}%  Tr={int(r['trades'])}")
 
         ranked = rank_with_p0(candidates, oos_per, WINDOWS, decay_threshold=-0.25)
-        print_phase_d_with_p0(ranked, "EMP")
+        print_phase_d_with_p0(ranked, "FBO_S2")
 
         winner_row = select_winner_with_p0(ranked)
         if winner_row is None:
-            print(f"\n  WARNING: 0 candidates passed P0. EMP archetype likely broken in this regime.")
-            print(f"  Best fallback (top by ranking): slope={ranked[0]['slope']:+.1%}")
             winner_row = ranked[0]
         winner = winner_row["cfg"]
-        print(f"\n  WINNER: EMA={winner.ema_period} Look={winner.lookback_bars} "
-              f"Band={winner.pullback_band_pts} SL={winner.sl_buffer_pts} "
-              f"RR={winner.rr_ratio} Tgt={winner.daily_target_pct} Loss={winner.daily_loss_pct}  "
+        print(f"\n  WINNER: TP={winner.take_profit_pts} SL={winner.stop_loss_pts} "
+              f"Bars={winner.fractal_bars} SMA={winner.sma_period} HTP={winner.half_tp_ratio}  "
               f"slope={winner_row['slope']:+.1%}  P0={'PASS' if winner_row['p0_pass'] else 'FAIL'}")
 
-        # Persist winner (or None if all failed) for downstream Phase E
-        import json
         winner_path = OUT_DIR / "winner.json"
-        winner_payload = {
-            "cfg": asdict(winner),
-            "p0_pass": winner_row["p0_pass"],
-            "slope": winner_row["slope"],
-            "oos_nps": winner_row["oos_nps"],
+        winner_path.write_text(json.dumps({
+            "cfg": asdict(winner), "p0_pass": winner_row["p0_pass"],
+            "slope": winner_row["slope"], "oos_nps": winner_row["oos_nps"],
             "total_np": winner_row["total_np"],
-        }
-        winner_path.write_text(json.dumps(winner_payload, indent=2, default=str), encoding="utf-8")
+        }, indent=2, default=str), encoding="utf-8")
         print(f"  Winner persisted: {winner_path}")
         sanity_et(winner, meta)
         print("\n=== Done ===")
