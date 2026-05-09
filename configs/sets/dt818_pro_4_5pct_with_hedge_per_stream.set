@@ -1,0 +1,106 @@
+; DT818_pro - 3-stream ORB rank portfolio, 4.5% total per setup
+; Generated 2026-05-08 from wfo_orb_may2
+;
+; Architecture: top 3 ranks from joint-session WFO running in parallel.
+; _RiskPct = 1.5 per stream so total when all 3 fire together = 4.5%.
+; Each stream has both LDN and NY enabled. Independent magics + caps.
+;
+; Top-N ranks selected:
+;   Rank 1: Range=90/SL=500/RR=4.0/HTP=0.25  P0=PASS slope=+78.3% plat=$4,059
+;   Rank 2: Range=90/SL=400/RR=4.0/HTP=0.0  P0=PASS slope=+51.9% plat=$7,649
+;   Rank 3: Range=90/SL=350/RR=4.0/HTP=0.5  P0=PASS slope=+3.8% plat=$6,515
+;
+; Spread guard: _MaxSpreadPts=50 (Vantage max observed 32pt; 50pt = 56% safety margin)
+
+; ===== Global account =====
+_CapitalProtectionAmount=0.0||0.0||1||0.0||0.0||N
+_RiskPct=1.5||1.5||1||1.5||1.5||N
+_LotMode=1||1||1||1||1||N
+TierBase=2000||2000||1||2000||2000||N
+LotStep=0.01||0.01||1||0.01||0.01||N
+_MaxSpreadPts=50||50||1||50||50||N
+
+; ===== ORB shared params =====
+_BrokerGMTOffsetHours=3||3||1||3||3||N
+_ORB_BufferPts=0||0||1||0||0||N
+_ORB_MinRangePts=200||200||1||200||200||N
+_ORB_MaxRangePts=5000||5000||1||5000||5000||N
+_ORB_LDN_Enabled=true
+_ORB_LDN_StartHour=7||7||1||7||7||N
+_ORB_NY_Enabled=true
+_ORB_NY_StartHour=13||13||1||13||13||N
+
+; ===== ORB_S1 — rank 1 (magic 1111) =====
+_ORB_S1_Enabled=true
+_ORB_S1_Magic=1111||1111||1||1111||1111||N
+_ORB_S1_Comment=ORB_S1
+_ORB_S1_RangeMinutes=90||90||1||90||90||N
+_ORB_S1_FixedSL_Pts=500||500||1||500||500||N
+_ORB_S1_RR_Ratio=4.0||4.0||1||4.0||4.0||N
+_ORB_S1_HalfTP_Ratio=0.25||0.25||1||0.25||0.25||N
+_ORB_S1_PendingExpireMinutes=240||240||1||240||240||N
+_ORB_S1_DailyTargetPct=0.0||0.0||1||0.0||0.0||N
+_ORB_S1_DailyLossPct=0.0||0.0||1||0.0||0.0||N
+
+; ===== HEDGE_S1 — global hedge for ORB_S1 (magic 5111) =====
+_HEDGE_S1_Enabled=true
+_HEDGE_S1_Magic=5111||5111||1||5111||5111||N
+_HEDGE_S1_Comment=ORB_S1h
+_HEDGE_S1_ParentMagic=1111||1111||1||1111||1111||N
+_HEDGE_S1_BufferPts=350||350||1||350||350||N
+_HEDGE_S1_FixedSL_Pts=500||500||1||500||500||N
+_HEDGE_S1_RR_Ratio=4.0||4.0||1||4.0||4.0||N
+_HEDGE_S1_ExpireMinutes=30||30||1||30||30||N
+_HEDGE_S1_RiskPct=1.5||1.5||1||1.5||1.5||N
+_HEDGE_S1_DailyLossPct=0.0||0.0||1||0.0||0.0||N
+_HEDGE_S1_MaxSecondsAfterEntry=3600||3600||1||3600||3600||N
+
+; ===== ORB_S2 — rank 2 (magic 2222) =====
+_ORB_S2_Enabled=true
+_ORB_S2_Magic=2222||2222||1||2222||2222||N
+_ORB_S2_Comment=ORB_S2
+_ORB_S2_RangeMinutes=90||90||1||90||90||N
+_ORB_S2_FixedSL_Pts=400||400||1||400||400||N
+_ORB_S2_RR_Ratio=4.0||4.0||1||4.0||4.0||N
+_ORB_S2_HalfTP_Ratio=0.0||0.0||1||0.0||0.0||N
+_ORB_S2_PendingExpireMinutes=240||240||1||240||240||N
+_ORB_S2_DailyTargetPct=0.0||0.0||1||0.0||0.0||N
+_ORB_S2_DailyLossPct=0.0||0.0||1||0.0||0.0||N
+
+; ===== HEDGE_S2 — global hedge for ORB_S2 (magic 5222) =====
+_HEDGE_S2_Enabled=true
+_HEDGE_S2_Magic=5222||5222||1||5222||5222||N
+_HEDGE_S2_Comment=ORB_S2h
+_HEDGE_S2_ParentMagic=2222||2222||1||2222||2222||N
+_HEDGE_S2_BufferPts=100||100||1||100||100||N
+_HEDGE_S2_FixedSL_Pts=500||500||1||500||500||N
+_HEDGE_S2_RR_Ratio=4.0||4.0||1||4.0||4.0||N
+_HEDGE_S2_ExpireMinutes=120||120||1||120||120||N
+_HEDGE_S2_RiskPct=1.5||1.5||1||1.5||1.5||N
+_HEDGE_S2_DailyLossPct=0.0||0.0||1||0.0||0.0||N
+_HEDGE_S2_MaxSecondsAfterEntry=3600||3600||1||3600||3600||N
+
+; ===== ORB_S3 — rank 3 (magic 3333) =====
+_ORB_S3_Enabled=true
+_ORB_S3_Magic=3333||3333||1||3333||3333||N
+_ORB_S3_Comment=ORB_S3
+_ORB_S3_RangeMinutes=90||90||1||90||90||N
+_ORB_S3_FixedSL_Pts=350||350||1||350||350||N
+_ORB_S3_RR_Ratio=4.0||4.0||1||4.0||4.0||N
+_ORB_S3_HalfTP_Ratio=0.5||0.5||1||0.5||0.5||N
+_ORB_S3_PendingExpireMinutes=240||240||1||240||240||N
+_ORB_S3_DailyTargetPct=0.0||0.0||1||0.0||0.0||N
+_ORB_S3_DailyLossPct=0.0||0.0||1||0.0||0.0||N
+
+; ===== HEDGE_S3 — global hedge for ORB_S3 (magic 5333) =====
+_HEDGE_S3_Enabled=true
+_HEDGE_S3_Magic=5333||5333||1||5333||5333||N
+_HEDGE_S3_Comment=ORB_S3h
+_HEDGE_S3_ParentMagic=3333||3333||1||3333||3333||N
+_HEDGE_S3_BufferPts=100||100||1||100||100||N
+_HEDGE_S3_FixedSL_Pts=500||500||1||500||500||N
+_HEDGE_S3_RR_Ratio=4.0||4.0||1||4.0||4.0||N
+_HEDGE_S3_ExpireMinutes=120||120||1||120||120||N
+_HEDGE_S3_RiskPct=1.5||1.5||1||1.5||1.5||N
+_HEDGE_S3_DailyLossPct=0.0||0.0||1||0.0||0.0||N
+_HEDGE_S3_MaxSecondsAfterEntry=3600||3600||1||3600||3600||N

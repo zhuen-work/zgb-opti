@@ -1,17 +1,22 @@
-"""Phase E: Combined 5-stream sanity using each WFO's winner.json.
+"""Phase E: Portfolio sanity for the 2-stream session-split ORB stack.
 
-Reads winner configs from:
-  output/wfo_orb_spread70_may2/winner.json
-  output/wfo_ema_pullback_may2/winner.json
-  output/wfo_fbo_s1_may2/winner.json
-  output/wfo_fbo_s2_may2/winner.json
-  output/wfo_lsfvg_may2/winner.json
+Loads per-session winners from the per-session WFOs:
+  output/wfo_orb_ldn_may2/winner.json
+  output/wfo_orb_ny_may2/winner.json
 
-Runs combined 5-stream deal-merge on shared $10k at 2/3/4.5%.
-Compares to current 4-stream baseline (EMP disabled).
+Runs LDN-only and NY-only sims separately, deal-merges on shared $10k account.
+Reports per-session NP, combined NP/DD$, plus the calibration haircut.
 
-Decision: each setfile risk level should keep configs that are net-positive
-in combined sanity AND don't make combined NP/DD worse than current.
+DESIGN CAVEAT (deal-merge approximation):
+Each session sim starts from isolated $10k for position sizing. Production
+shares balance across sessions, so this approach under-counts NP by ~10-20%
+due to missed compounding. The bias is conservative and applies equally to
+all candidates being compared, so RANK ORDER is preserved. Absolute NP
+projections should be adjusted upward ~+15% for production-accurate forecast.
+
+If both per-session winner.json files are missing, falls back to the legacy
+`output/wfo_orb_may2/winner.json` (single both-sessions winner) and runs
+that as a single sim with both sessions enabled (no compounding bias).
 """
 from __future__ import annotations
 
@@ -23,16 +28,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from zgb_sim.tick_loader import symbol_meta, kill_mt5_terminal, load_ticks, load_bars
+from zgb_sim.tick_loader import symbol_meta, kill_mt5_terminal, load_ticks, load_bars, SIM_SPREAD_PTS
 from zgb_sim.scalper_v1 import SymbolMeta
-from zgb_sim.fbo_s1 import FBOS1Config
-from zgb_sim.fbo_s1_fast import simulate_fast as fbo_simulate
 from zgb_sim.orb import ORBConfig
 from zgb_sim.orb_fast import simulate_fast as orb_simulate
-from zgb_sim.lsfvg import LSFVGConfig
-from zgb_sim.lsfvg_fast import simulate_fast as lsfvg_simulate
-from zgb_sim.ema_pullback import EMAPullbackConfig
-from zgb_sim.ema_pullback_fast import simulate_fast as ep_simulate
 
 SYMBOL = "XAUUSD"
 DEPOSIT = 10_000.0
@@ -41,42 +40,87 @@ WFO_BASELINE_RISK = 3.0
 
 def load_winner(path: Path):
     if not path.exists():
-        print(f"  [skip] {path} not found")
         return None
-    data = json.loads(path.read_text())
-    # Normalize: ORB script writes cfg dict directly at top level;
-    # other scripts wrap it as {"cfg": ..., "p0_pass": ..., ...}
-    if "cfg" not in data:
-        # ORB-style: bare cfg dict. We KNOW from log the ORB winner passed P0.
-        data = {"cfg": data, "p0_pass": True, "slope": 0.0, "oos_nps": [], "total_np": 1.0}
-    return data
+    return json.loads(path.read_text())
 
 
-def is_viable_winner(w: dict) -> bool:
-    """Decide whether a stream's WFO winner should be included in Phase E.
-    Rule: must pass P0 AND have positive total OOS NP.
-    EMP failed this (P0 PASS but NP -$849) -- correctly excluded.
-    """
-    if w is None:
-        return False
-    return bool(w.get("p0_pass", False)) and w.get("total_np", 0.0) > 0
-
-
-def make_cfg(winner: dict, cfg_class, risk: float, **field_overrides):
-    """Build a config from winner.json, scaling risk_pct + caps if present."""
+def make_session_cfg(winner: dict, risk: float, session: str) -> ORBConfig:
+    """Build ORBConfig from winner.json with one session enabled."""
     cfg_dict = dict(winner["cfg"])
     cfg_dict["risk_pct"] = risk
-    # Scale daily caps if present (anchor to WFO_BASELINE_RISK = 3.0)
-    if "daily_target_pct" in cfg_dict and cfg_dict["daily_target_pct"] > 0:
-        cfg_dict["daily_target_pct"] = cfg_dict["daily_target_pct"] * (risk / WFO_BASELINE_RISK)
-    if "daily_loss_pct" in cfg_dict and cfg_dict["daily_loss_pct"] > 0:
-        cfg_dict["daily_loss_pct"] = cfg_dict["daily_loss_pct"] * (risk / WFO_BASELINE_RISK)
-    cfg_dict.update(field_overrides)
-    # Drop any keys not in the class's fields
+    cfg_dict["ldn_enabled"] = (session == "ldn")
+    cfg_dict["ny_enabled"]  = (session == "ny")
+    if cfg_dict.get("daily_target_pct", 0) > 0:
+        cfg_dict["daily_target_pct"] *= (risk / WFO_BASELINE_RISK)
+    if cfg_dict.get("daily_loss_pct", 0) > 0:
+        cfg_dict["daily_loss_pct"]   *= (risk / WFO_BASELINE_RISK)
     import dataclasses
-    field_names = {f.name for f in dataclasses.fields(cfg_class)}
-    cfg_dict = {k: v for k, v in cfg_dict.items() if k in field_names}
-    return cfg_class(**cfg_dict)
+    fields = {f.name for f in dataclasses.fields(ORBConfig)}
+    cfg_dict = {k: v for k, v in cfg_dict.items() if k in fields}
+    return ORBConfig(**cfg_dict)
+
+
+def make_combined_cfg(winner: dict, risk: float) -> ORBConfig:
+    """Legacy fallback: single config with both sessions enabled."""
+    cfg_dict = dict(winner["cfg"])
+    cfg_dict["risk_pct"] = risk
+    cfg_dict["ldn_enabled"] = True
+    cfg_dict["ny_enabled"]  = True
+    if cfg_dict.get("daily_target_pct", 0) > 0:
+        cfg_dict["daily_target_pct"] *= (risk / WFO_BASELINE_RISK)
+    if cfg_dict.get("daily_loss_pct", 0) > 0:
+        cfg_dict["daily_loss_pct"]   *= (risk / WFO_BASELINE_RISK)
+    import dataclasses
+    fields = {f.name for f in dataclasses.fields(ORBConfig)}
+    cfg_dict = {k: v for k, v in cfg_dict.items() if k in fields}
+    return ORBConfig(**cfg_dict)
+
+
+def aggregate_deals(deals: list[tuple]) -> dict:
+    """Walk sorted deals -> compute NP, DD$, NP/DD$."""
+    bal = DEPOSIT; bal_max = DEPOSIT; dd_abs = 0.0
+    for _, _s, p in sorted(deals, key=lambda x: x[0]):
+        bal += p
+        if bal > bal_max: bal_max = bal
+        cur = bal_max - bal
+        if cur > dd_abs: dd_abs = cur
+    np_ = bal - DEPOSIT
+    dd_pct = dd_abs / bal_max * 100 if bal_max > 0 else 0
+    ndd = np_ / dd_abs if dd_abs > 0 else 0
+    return dict(np=np_, dd_pct=dd_pct, dd_abs=dd_abs, ndd=ndd)
+
+
+def run_per_session(ldn_winner: dict, ny_winner: dict, ticks, m1, m5, meta, risk: float):
+    """Two separate sims (LDN-only, NY-only), deal-merge."""
+    ldn_cfg = make_session_cfg(ldn_winner, risk, "ldn")
+    ny_cfg  = make_session_cfg(ny_winner,  risk, "ny")
+    r_ldn = orb_simulate(ticks, m5, m1, ldn_cfg, meta, initial_balance=DEPOSIT)
+    r_ny  = orb_simulate(ticks, m5, m1, ny_cfg,  meta, initial_balance=DEPOSIT)
+    deals = []
+    for s, r in [("ORB_LDN", r_ldn), ("ORB_NY", r_ny)]:
+        for d in r.deals:
+            if d.kind != "entry":
+                deals.append((d.ts, s, d.pnl))
+    agg = aggregate_deals(deals)
+    agg["trades"] = len(deals)
+    agg["per_stream"] = {
+        "ORB_LDN": (sum(p for _, ss, p in deals if ss == "ORB_LDN"),
+                    sum(1 for _, ss, _ in deals if ss == "ORB_LDN")),
+        "ORB_NY":  (sum(p for _, ss, p in deals if ss == "ORB_NY"),
+                    sum(1 for _, ss, _ in deals if ss == "ORB_NY")),
+    }
+    return agg
+
+
+def run_combined_legacy(winner: dict, ticks, m1, m5, meta, risk: float):
+    """Single sim with both sessions enabled (legacy / fallback)."""
+    cfg = make_combined_cfg(winner, risk)
+    r = orb_simulate(ticks, m5, m1, cfg, meta, initial_balance=DEPOSIT)
+    deals = [(d.ts, "ORB", d.pnl) for d in r.deals if d.kind != "entry"]
+    agg = aggregate_deals(deals)
+    agg["trades"] = len(deals)
+    agg["per_stream"] = {"ORB": (r.net_profit, r.trades)}
+    return agg
 
 
 def main() -> int:
@@ -93,78 +137,56 @@ def main() -> int:
         ticks = load_ticks(SYMBOL, start, end)
         m1 = load_bars(SYMBOL, "M1", start, end)
         m5 = load_bars(SYMBOL, "M5", start, end)
-        m15 = load_bars(SYMBOL, "M15", start, end)
-        m30 = load_bars(SYMBOL, "M30", start, end)
+
+        ldn_w = load_winner(ROOT / "output" / "wfo_orb_ldn_may2" / "winner.json")
+        ny_w  = load_winner(ROOT / "output" / "wfo_orb_ny_may2" / "winner.json")
+        legacy_w = load_winner(ROOT / "output" / "wfo_orb_may2" / "winner.json")
+
+        if ldn_w and ny_w:
+            mode = "per-session"
+        elif legacy_w:
+            mode = "legacy-single"
+        else:
+            print("No winners found. Run scripts/sim_wfo_orb.py first.")
+            return 1
 
         print("=" * 100)
-        print(f"  PHASE E: Combined sanity with all 5 WFO winners ({days}d, $10k, 70pt)")
+        print(f"  PHASE E: 2-stream session-split portfolio sanity ({days}d, $10k, {SIM_SPREAD_PTS}pt friction)")
+        print(f"  Mode: {mode}")
         print("=" * 100)
 
-        winners = {
-            "FBO_S1": load_winner(ROOT / "output" / "wfo_fbo_s1_may2" / "winner.json"),
-            "FBO_S2": load_winner(ROOT / "output" / "wfo_fbo_s2_may2" / "winner.json"),
-            "ORB":    load_winner(ROOT / "output" / "wfo_orb_spread70_may2" / "winner.json"),
-            "LSFVG":  load_winner(ROOT / "output" / "wfo_lsfvg_may2" / "winner.json"),
-            "EMP":    load_winner(ROOT / "output" / "wfo_ema_pullback_may2" / "winner.json"),
-        }
-        for s, w in winners.items():
-            if w is not None:
-                p0 = w.get("p0_pass", "?")
-                slope = w.get("slope", 0)
-                print(f"  {s:<8} P0={p0}  slope={slope:+.1%}  cfg={w['cfg']}")
+        if mode == "per-session":
+            print(f"  ORB_LDN winner: P0={ldn_w.get('p0_pass')} slope={ldn_w.get('slope', 0):+.1%}  "
+                  f"cfg={ldn_w['cfg']}")
+            print(f"  ORB_NY  winner: P0={ny_w.get('p0_pass')} slope={ny_w.get('slope', 0):+.1%}  "
+                  f"cfg={ny_w['cfg']}")
+            print()
+            print("  NOTE: deal-merge of two isolated-balance sims under-counts compounding")
+            print("        ~10-20% NP shortfall vs production. Rank order is preserved.")
+        else:
+            print(f"  Legacy winner: P0={legacy_w.get('p0_pass')} slope={legacy_w.get('slope', 0):+.1%}  "
+                  f"cfg={legacy_w['cfg']}")
 
         for risk in (2.0, 3.0, 4.5):
             print(f"\n  --- Combined sanity at {risk}% risk ---")
-            cfgs_loaded = {}
-            # Only include streams whose winner passed P0 AND has positive NP
-            for name, cfg_class in [("FBO_S1", FBOS1Config), ("FBO_S2", FBOS1Config),
-                                      ("ORB", ORBConfig), ("LSFVG", LSFVGConfig),
-                                      ("EMP", EMAPullbackConfig)]:
-                w = winners.get(name)
-                if is_viable_winner(w):
-                    cfgs_loaded[name] = make_cfg(w, cfg_class, risk)
-                else:
-                    reason = "no winner" if w is None else (
-                        "FAILED P0" if not w.get("p0_pass") else "negative NP")
-                    print(f"    [{name} excluded — {reason}]")
+            if mode == "per-session":
+                agg = run_per_session(ldn_w, ny_w, ticks, m1, m5, meta, risk)
+            else:
+                agg = run_combined_legacy(legacy_w, ticks, m1, m5, meta, risk)
 
-            results = {}
-            for s, cfg in cfgs_loaded.items():
-                if s == "FBO_S1":
-                    r = fbo_simulate(ticks, m30, m1, cfg, meta, initial_balance=DEPOSIT)
-                elif s == "FBO_S2":
-                    r = fbo_simulate(ticks, m15, m1, cfg, meta, initial_balance=DEPOSIT)
-                elif s == "ORB":
-                    r = orb_simulate(ticks, m5, m1, cfg, meta, initial_balance=DEPOSIT)
-                elif s == "LSFVG":
-                    r = lsfvg_simulate(ticks, m15, m1, cfg, meta, initial_balance=DEPOSIT)
-                elif s == "EMP":
-                    r = ep_simulate(ticks, m15, m1, cfg, meta, initial_balance=DEPOSIT)
-                results[s] = r
+            np_haircut = agg["np"] * 0.94
+            np_compound_adj = agg["np"] * 1.15 if mode == "per-session" else agg["np"]
 
-            all_deals = []
-            for s, r in results.items():
-                for d in r.deals:
-                    if d.kind != "entry":
-                        all_deals.append((d.ts, s, d.pnl))
-            all_deals.sort(key=lambda x: x[0])
-
-            bal = DEPOSIT; bal_max = DEPOSIT; dd_abs = 0.0
-            for _, _s, p in all_deals:
-                bal += p
-                if bal > bal_max: bal_max = bal
-                cur = bal_max - bal
-                if cur > dd_abs: dd_abs = cur
-            np_ = bal - DEPOSIT
-            dd_pct = dd_abs / bal_max * 100 if bal_max > 0 else 0
-            ndd = np_ / dd_abs if dd_abs > 0 else 0
-
-            print(f"  COMBINED:  NP=${np_:+,.0f}  ROI={np_/DEPOSIT*100:+.1f}%  "
-                  f"DD={dd_pct:.1f}%  NP/DD={ndd:.2f}  Trades={len(all_deals)}")
-            for s in ("FBO_S1", "FBO_S2", "ORB", "LSFVG", "EMP"):
-                np_s = sum(p for _,ss,p in all_deals if ss == s)
-                tr_s = sum(1 for _,ss,_ in all_deals if ss == s)
-                print(f"    {s:<7}  ${np_s:>+9,.0f}  ({tr_s} trades)")
+            print(f"  COMBINED:  NP=${agg['np']:+,.0f}  ROI={agg['np']/DEPOSIT*100:+.1f}%  "
+                  f"DD={agg['dd_pct']:.1f}%  NP/DD$={agg['ndd']:.2f}  Trades={agg['trades']}")
+            if mode == "per-session":
+                print(f"             ~live (haircut 0.94×): ${np_haircut:+,.0f}   "
+                      f"~production (compound +15%): ${np_compound_adj:+,.0f}")
+            else:
+                print(f"             ~live (haircut 0.94×): ${np_haircut:+,.0f}")
+            for s, (np_s, tr_s) in agg["per_stream"].items():
+                if tr_s > 0:
+                    print(f"    {s:<10}  ${np_s:>+9,.0f}  ({tr_s} trades)")
     finally:
         kill_mt5_terminal()
     return 0

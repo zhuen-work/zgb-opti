@@ -1,25 +1,28 @@
 //+------------------------------------------------------------------+
-//| DT818_pro.mq5                                                     |
-//| ORB EA: 3-stream rank-portfolio (S1 + S2 + S3)                    |
+//| DT818_pro_hedge.mq5                                               |
+//| ORB EA: 3-stream rank-portfolio (S1 + S2 + S3) + per-stream HEDGE |
 //|                                                                   |
-//| Each stream runs the ORB strategy with DIFFERENT params (top 3    |
-//| ranks from the joint-session WFO). All streams trade BOTH LDN     |
-//| and NY sessions. Per-stream magic + caps; one stream's lock       |
-//| does not affect others.                                            |
+//| Variant of DT818_pro.mq5 with hedge sub-streams (HEDGE_S1/S2/S3   |
+//| at magics 5111/5222/5333). On each parent SL hit, places opposite-|
+//| direction LIMIT order at sl_price ± buffer with own SL/TP/expire. |
 //|                                                                   |
+//| Parents (unchanged from DT818_pro):                                |
 //|   ORB_S1 (magic 1111): rank 1 cfg                                 |
 //|   ORB_S2 (magic 2222): rank 2 cfg                                 |
 //|   ORB_S3 (magic 3333): rank 3 cfg                                 |
+//| Hedges (per-stream WFO winners, sim_wfo_hedge.py May 2):          |
+//|   HEDGE_S1 (5111): buf=350 SL=500 RR=4.0 exp=30  (S1 wide-SL fit) |
+//|   HEDGE_S2 (5222): buf=100 SL=500 RR=4.0 exp=120                  |
+//|   HEDGE_S3 (5333): buf=100 SL=500 RR=4.0 exp=120                  |
 //|                                                                   |
-//| Risk allocation: setfile _RiskPct = total_risk / 3 so total       |
-//| per-setup exposure = _RiskPct × 3 when all streams enter together.|
-//|                                                                   |
-//| FBO removed 2026-05-03. LSFVG removed 2026-05-03. EMP removed     |
-//| 2026-05-02. Session split (LDN/NY streams) replaced by rank split |
-//| 2026-05-03 — Phase E showed rank portfolio NP/DD$ wins decisively.|
+//| Risk allocation: parent + hedge each at _RiskPct per stream.      |
+//| Combined max-stop exposure = 2 × setfile name (e.g. 3% setfile    |
+//| -> 6% if all 3 parents + 3 hedges stop on same day). Phase E      |
+//| validates realised DD stays well below max because hedges win on  |
+//| days parents lose.                                                 |
 //+------------------------------------------------------------------+
 #property copyright "ZGB Trading"
-#property version   "1.00"
+#property version   "2.00"
 #property strict
 
 #include <Trade/Trade.mqh>
@@ -93,6 +96,58 @@ input double  _ORB_S3_DailyTargetPct       = 0.0;
 input double  _ORB_S3_DailyLossPct         = 0.0;
 
 //====================================================================
+// HEDGE_S1 — global hedge sub-stream for ORB_S1 (magic 5111)
+// Fires opposite-direction LIMIT after parent SL hit. Same params for S1/S2/S3
+// per global-hedge WFO (sim_wfo_hedge_global.py).
+//====================================================================
+// Per-stream defaults from sim_wfo_hedge.py May 2 (S1 differs from S2/S3).
+// S1 winner: buf=350/h_sl=500/h_rr=4.0/exp=30 (wider parent SL=500 needs wide buffer + short window)
+input bool    _HEDGE_S1_Enabled       = true;
+input int     _HEDGE_S1_Magic         = 5111;
+input string  _HEDGE_S1_Comment       = "ORB_S1h";
+input int     _HEDGE_S1_ParentMagic   = 1111;
+input int     _HEDGE_S1_BufferPts     = 350;
+input int     _HEDGE_S1_FixedSL_Pts   = 500;
+input double  _HEDGE_S1_RR_Ratio      = 4.0;
+input int     _HEDGE_S1_ExpireMinutes = 30;
+input double  _HEDGE_S1_RiskPct       = 1.0;
+input double  _HEDGE_S1_DailyLossPct  = 0.0;
+// F1 fast-SL filter: only fire hedge if parent SL hit <= this seconds after entry.
+// 3600 = 60min (validated 2026-05-08 vs always-on; mean NP/DD$ +2.97 vs +2.78).
+// 0 = disable filter (always fire = old always-on behavior).
+input int     _HEDGE_S1_MaxSecondsAfterEntry = 3600;
+
+//====================================================================
+// HEDGE_S2 — global hedge for ORB_S2 (magic 5222)
+//====================================================================
+input bool    _HEDGE_S2_Enabled       = true;
+input int     _HEDGE_S2_Magic         = 5222;
+input string  _HEDGE_S2_Comment       = "ORB_S2h";
+input int     _HEDGE_S2_ParentMagic   = 2222;
+input int     _HEDGE_S2_BufferPts     = 100;
+input int     _HEDGE_S2_FixedSL_Pts   = 500;
+input double  _HEDGE_S2_RR_Ratio      = 4.0;
+input int     _HEDGE_S2_ExpireMinutes = 120;
+input double  _HEDGE_S2_RiskPct       = 1.0;
+input double  _HEDGE_S2_DailyLossPct  = 0.0;
+input int     _HEDGE_S2_MaxSecondsAfterEntry = 3600;
+
+//====================================================================
+// HEDGE_S3 — global hedge for ORB_S3 (magic 5333)
+//====================================================================
+input bool    _HEDGE_S3_Enabled       = true;
+input int     _HEDGE_S3_Magic         = 5333;
+input string  _HEDGE_S3_Comment       = "ORB_S3h";
+input int     _HEDGE_S3_ParentMagic   = 3333;
+input int     _HEDGE_S3_BufferPts     = 100;
+input int     _HEDGE_S3_FixedSL_Pts   = 500;
+input double  _HEDGE_S3_RR_Ratio      = 4.0;
+input int     _HEDGE_S3_ExpireMinutes = 120;
+input double  _HEDGE_S3_RiskPct       = 1.0;
+input double  _HEDGE_S3_DailyLossPct  = 0.0;
+input int     _HEDGE_S3_MaxSecondsAfterEntry = 3600;
+
+//====================================================================
 // Globals
 //====================================================================
 datetime g_lastBar_M1 = 0;       // shared M1 bar tracker
@@ -135,6 +190,48 @@ ORBSession g_s3_ldn = {0};   ORBSession g_s3_ny = {0};
 datetime g_s1_day = 0;   double g_s1_bal_start = 0.0;   bool g_s1_lock = false;
 datetime g_s2_day = 0;   double g_s2_bal_start = 0.0;   bool g_s2_lock = false;
 datetime g_s3_day = 0;   double g_s3_bal_start = 0.0;   bool g_s3_lock = false;
+
+// Hedge stream cfg
+struct HedgeStreamCfg
+{
+   bool   enabled;
+   int    magic;
+   int    parent_magic;
+   string comment;
+   int    buffer_pts;
+   int    fixed_sl_pts;
+   double rr_ratio;
+   int    expire_minutes;
+   double risk_pct;
+   double daily_loss_pct;
+   int    max_seconds_after_entry;  // F1 filter: hedge only if parent SL <= N seconds post-entry; 0 = disabled
+};
+HedgeStreamCfg g_hedge_s1, g_hedge_s2, g_hedge_s3;
+
+// Hedge daily-cap state
+datetime g_hs1_day = 0;  double g_hs1_bal_start = 0.0;  bool g_hs1_lock = false;
+datetime g_hs2_day = 0;  double g_hs2_bal_start = 0.0;  bool g_hs2_lock = false;
+datetime g_hs3_day = 0;  double g_hs3_bal_start = 0.0;  bool g_hs3_lock = false;
+
+// Track last-processed deal time per hedge stream so we don't fire on the same parent SL twice.
+datetime g_hedge_last_scan = 0;
+
+// Recently-processed deal tickets (rotating buffer) — prevents duplicate hedge fires
+// if multiple ticks scan the same history range. Holds last 64 deal tickets.
+ulong g_hedge_seen_tickets[64];
+int   g_hedge_seen_idx = 0;
+
+bool HedgeWasSeen(ulong ticket)
+{
+   for(int i = 0; i < ArraySize(g_hedge_seen_tickets); i++)
+      if(g_hedge_seen_tickets[i] == ticket) return true;
+   return false;
+}
+void HedgeMarkSeen(ulong ticket)
+{
+   g_hedge_seen_tickets[g_hedge_seen_idx] = ticket;
+   g_hedge_seen_idx = (g_hedge_seen_idx + 1) % ArraySize(g_hedge_seen_tickets);
+}
 
 //====================================================================
 // Helpers
@@ -318,7 +415,7 @@ bool StreamDailyCapsCheck(int magic, double targetPct, double lossPct,
       ClosePositionsByMagic(magic);
       CancelPendingByMagic(magic);
       lockState = true;
-      PrintFormat("[DT818_pro] Magic %d daily TARGET hit at $%.2f (+%.2f%%), locking.",
+      PrintFormat("[DT818_pro_hedge] Magic %d daily TARGET hit at $%.2f (+%.2f%%), locking.",
                   magic, pnl, pnl / balStart * 100.0);
       return true;
    }
@@ -327,7 +424,7 @@ bool StreamDailyCapsCheck(int magic, double targetPct, double lossPct,
       ClosePositionsByMagic(magic);
       CancelPendingByMagic(magic);
       lockState = true;
-      PrintFormat("[DT818_pro] Magic %d daily LOSS hit at $%.2f (%.2f%%), locking.",
+      PrintFormat("[DT818_pro_hedge] Magic %d daily LOSS hit at $%.2f (%.2f%%), locking.",
                   magic, pnl, pnl / balStart * 100.0);
       return true;
    }
@@ -457,11 +554,8 @@ void ProcessORBStream(const ORBStreamCfg &cfg,
    if(!SpreadOK()) return;
    // Use TimeGMT() so session timing is broker-tz-independent.
    // _ORB_LDN_StartHour / _ORB_NY_StartHour are UTC; no offset applied.
-   // _BrokerGMTOffsetHours is retained as input for backward setfile
-   // compatibility but is no longer used for session detection.
-   // Bug fix 2026-05-07: previously TimeCurrent() (broker time) was used
-   // with offset added; this caused 3hr-late firing whenever broker server
-   // ran on UTC instead of GMT+3.
+   // _BrokerGMTOffsetHours retained for backward setfile compatibility
+   // but no longer used. Bug fix 2026-05-07.
    datetime now = TimeGMT();
    MqlDateTime mt; TimeToStruct(now, mt);
 
@@ -479,6 +573,145 @@ void ProcessORBStream(const ORBStreamCfg &cfg,
          InitORBSession(ny_state, cfg, ny_hour, now);
       UpdateORBSession(ny_state, cfg, now);
    }
+}
+
+//====================================================================
+// ProcessHedgeStream — fires opposite-direction LIMIT after parent SL hit.
+//
+// Called once per OnTick per hedge stream. Walks history for new exit deals
+// matching the parent magic; if the exit was an SL hit (comment starts with
+// "[sl"), places a pending opposite-direction LIMIT at sl_price ± buffer_pts
+// with own SL/TP/expire.
+//
+// Hedge direction = exit deal type (closing a BUY = SELL exit = SELL hedge;
+// closing a SELL = BUY exit = BUY hedge — both equal "opposite of original").
+//====================================================================
+void ProcessHedgeStream(HedgeStreamCfg &hcfg)
+{
+   if(!hcfg.enabled) return;
+   if(_MaxSpreadPts > 0)
+   {
+      long spread = SymbolInfoInteger(_Symbol, SYMBOL_SPREAD);
+      if(spread > _MaxSpreadPts) return;
+   }
+
+   // Scan history from (last scan time - 60s grace) to now for new exit deals
+   datetime now = TimeCurrent();
+   datetime scan_from = (g_hedge_last_scan > 0) ? g_hedge_last_scan - 60 : now - 3600;
+   if(!HistorySelect(scan_from, now)) return;
+
+   int total = HistoryDealsTotal();
+   for(int i = 0; i < total; i++)
+   {
+      ulong dt = HistoryDealGetTicket(i);
+      if(dt == 0) continue;
+      long magic = HistoryDealGetInteger(dt, DEAL_MAGIC);
+      if((int)magic != hcfg.parent_magic) continue;
+      long entry_kind = HistoryDealGetInteger(dt, DEAL_ENTRY);
+      if(entry_kind != DEAL_ENTRY_OUT) continue; // only exit deals
+      string sym = HistoryDealGetString(dt, DEAL_SYMBOL);
+      if(sym != _Symbol) continue;
+      if(HedgeWasSeen(dt)) continue;
+
+      // Check it was an SL exit (comment usually "[sl 4595.96]")
+      string comment = HistoryDealGetString(dt, DEAL_COMMENT);
+      if(StringFind(comment, "[sl") != 0) continue;
+
+      // F1 filter: skip hedge if parent SL hit too late after entry (= trend continuation, not overshoot).
+      // Validated 2026-05-08: 60min cutoff gives mean NP/DD$ +2.97 vs +2.78 always-on.
+      if(hcfg.max_seconds_after_entry > 0)
+      {
+         long pos_id = HistoryDealGetInteger(dt, DEAL_POSITION_ID);
+         datetime entry_time = 0;
+         // Look up the parent's IN deal (entry) for this position
+         for(int j = 0; j < total; j++)
+         {
+            ulong et = HistoryDealGetTicket(j);
+            if(et == 0) continue;
+            if(HistoryDealGetInteger(et, DEAL_POSITION_ID) == pos_id &&
+               HistoryDealGetInteger(et, DEAL_ENTRY) == DEAL_ENTRY_IN)
+            {
+               entry_time = (datetime)HistoryDealGetInteger(et, DEAL_TIME);
+               break;
+            }
+         }
+         datetime sl_time = (datetime)HistoryDealGetInteger(dt, DEAL_TIME);
+         if(entry_time > 0 && (sl_time - entry_time) > hcfg.max_seconds_after_entry)
+         {
+            // SLOW SL — likely trend continuation, hedge would get clipped. Skip.
+            HedgeMarkSeen(dt);  // mark so we don't keep checking this deal
+            PrintFormat("[%s] hedge SKIPPED (F1 filter: SL %ds after entry > %ds cutoff)",
+                        hcfg.comment,
+                        (int)(sl_time - entry_time),
+                        hcfg.max_seconds_after_entry);
+            continue;
+         }
+         // else: fast SL (overshoot) — proceed to place hedge
+      }
+
+      // Mark seen FIRST so we don't retry on transient errors
+      HedgeMarkSeen(dt);
+
+      // Hedge direction = exit deal type (opposite of parent's original direction)
+      long deal_type = HistoryDealGetInteger(dt, DEAL_TYPE);
+      double sl_price = HistoryDealGetDouble(dt, DEAL_PRICE);
+      ENUM_ORDER_TYPE order_type;
+      double entry_px, h_sl, h_tp;
+      double pt = _Point;
+      if(deal_type == DEAL_TYPE_SELL)
+      {
+         // Closing a BUY position — original direction was BUY; hedge = SELL LIMIT above SL
+         order_type = ORDER_TYPE_SELL_LIMIT;
+         entry_px = NormPrice(sl_price + hcfg.buffer_pts * pt);
+         h_sl     = NormPrice(entry_px + hcfg.fixed_sl_pts * pt);
+         h_tp     = NormPrice(entry_px - hcfg.fixed_sl_pts * hcfg.rr_ratio * pt);
+      }
+      else if(deal_type == DEAL_TYPE_BUY)
+      {
+         // Closing a SELL position — original was SELL; hedge = BUY LIMIT below SL
+         order_type = ORDER_TYPE_BUY_LIMIT;
+         entry_px = NormPrice(sl_price - hcfg.buffer_pts * pt);
+         h_sl     = NormPrice(entry_px - hcfg.fixed_sl_pts * pt);
+         h_tp     = NormPrice(entry_px + hcfg.fixed_sl_pts * hcfg.rr_ratio * pt);
+      }
+      else continue;
+
+      // Lot sizing: hcfg.risk_pct of balance / fixed_sl_pts (in account currency per pt)
+      double balance = AccountInfoDouble(ACCOUNT_BALANCE);
+      double risk_money = balance * hcfg.risk_pct / 100.0;
+      double tick_size = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_SIZE);
+      double tick_value = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_VALUE);
+      double sl_money_per_lot = (hcfg.fixed_sl_pts * pt / tick_size) * tick_value;
+      if(sl_money_per_lot <= 0) continue;
+      double lots = risk_money / sl_money_per_lot;
+      double vstep = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_STEP);
+      double vmin  = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
+      double vmax  = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MAX);
+      if(vstep <= 0) vstep = 0.01;
+      lots = MathRound(lots / vstep) * vstep;
+      if(lots < vmin) lots = vmin;
+      if(lots > vmax) lots = vmax;
+      if(lots <= 0) continue;
+
+      datetime expire = now + hcfg.expire_minutes * 60;
+      g_trade.SetExpertMagicNumber(hcfg.magic);
+      bool ok = false;
+      if(order_type == ORDER_TYPE_SELL_LIMIT)
+         ok = g_trade.SellLimit(lots, entry_px, _Symbol, h_sl, h_tp,
+                                ORDER_TIME_SPECIFIED, expire, hcfg.comment);
+      else
+         ok = g_trade.BuyLimit(lots, entry_px, _Symbol, h_sl, h_tp,
+                               ORDER_TIME_SPECIFIED, expire, hcfg.comment);
+      if(!ok)
+         PrintFormat("[%s] hedge order failed (parent magic=%d ticket=%I64u): %s",
+                     hcfg.comment, hcfg.parent_magic, dt, g_trade.ResultRetcodeDescription());
+      else
+         PrintFormat("[%s] hedge %s lots=%.2f @ %.2f SL=%.2f TP=%.2f exp=%dmin (parent SL @ %.2f)",
+                     hcfg.comment,
+                     (order_type == ORDER_TYPE_SELL_LIMIT ? "SELL_LIMIT" : "BUY_LIMIT"),
+                     lots, entry_px, h_sl, h_tp, hcfg.expire_minutes, sl_price);
+   }
+   g_hedge_last_scan = now;
 }
 
 //====================================================================
@@ -523,20 +756,53 @@ int OnInit()
    g_cfg_s3.daily_target_pct       = _ORB_S3_DailyTargetPct;
    g_cfg_s3.daily_loss_pct         = _ORB_S3_DailyLossPct;
 
+   // Build hedge stream cfgs from inputs
+   g_hedge_s1.enabled = _HEDGE_S1_Enabled;   g_hedge_s1.magic = _HEDGE_S1_Magic;
+   g_hedge_s1.parent_magic = _HEDGE_S1_ParentMagic;  g_hedge_s1.comment = _HEDGE_S1_Comment;
+   g_hedge_s1.buffer_pts = _HEDGE_S1_BufferPts;      g_hedge_s1.fixed_sl_pts = _HEDGE_S1_FixedSL_Pts;
+   g_hedge_s1.rr_ratio = _HEDGE_S1_RR_Ratio;          g_hedge_s1.expire_minutes = _HEDGE_S1_ExpireMinutes;
+   g_hedge_s1.risk_pct = _HEDGE_S1_RiskPct;           g_hedge_s1.daily_loss_pct = _HEDGE_S1_DailyLossPct;
+   g_hedge_s1.max_seconds_after_entry = _HEDGE_S1_MaxSecondsAfterEntry;
+
+   g_hedge_s2.enabled = _HEDGE_S2_Enabled;   g_hedge_s2.magic = _HEDGE_S2_Magic;
+   g_hedge_s2.parent_magic = _HEDGE_S2_ParentMagic;  g_hedge_s2.comment = _HEDGE_S2_Comment;
+   g_hedge_s2.buffer_pts = _HEDGE_S2_BufferPts;      g_hedge_s2.fixed_sl_pts = _HEDGE_S2_FixedSL_Pts;
+   g_hedge_s2.rr_ratio = _HEDGE_S2_RR_Ratio;          g_hedge_s2.expire_minutes = _HEDGE_S2_ExpireMinutes;
+   g_hedge_s2.risk_pct = _HEDGE_S2_RiskPct;           g_hedge_s2.daily_loss_pct = _HEDGE_S2_DailyLossPct;
+   g_hedge_s2.max_seconds_after_entry = _HEDGE_S2_MaxSecondsAfterEntry;
+
+   g_hedge_s3.enabled = _HEDGE_S3_Enabled;   g_hedge_s3.magic = _HEDGE_S3_Magic;
+   g_hedge_s3.parent_magic = _HEDGE_S3_ParentMagic;  g_hedge_s3.comment = _HEDGE_S3_Comment;
+   g_hedge_s3.buffer_pts = _HEDGE_S3_BufferPts;      g_hedge_s3.fixed_sl_pts = _HEDGE_S3_FixedSL_Pts;
+   g_hedge_s3.rr_ratio = _HEDGE_S3_RR_Ratio;          g_hedge_s3.expire_minutes = _HEDGE_S3_ExpireMinutes;
+   g_hedge_s3.risk_pct = _HEDGE_S3_RiskPct;           g_hedge_s3.daily_loss_pct = _HEDGE_S3_DailyLossPct;
+   g_hedge_s3.max_seconds_after_entry = _HEDGE_S3_MaxSecondsAfterEntry;
+
+   ArrayInitialize(g_hedge_seen_tickets, 0);
+   g_hedge_last_scan = TimeCurrent();
+
    g_lastBar_M1 = iTime(_Symbol, PERIOD_M1, 0);
 
    double bal = AccountInfoDouble(ACCOUNT_BALANCE);
    g_s1_bal_start = bal;
    g_s2_bal_start = bal;
    g_s3_bal_start = bal;
+   g_hs1_bal_start = bal;  g_hs2_bal_start = bal;  g_hs3_bal_start = bal;
 
-   PrintFormat("[DT818_pro] Init. Streams S1=%d S2=%d S3=%d  Sessions LDN=%d NY=%d  "
+   PrintFormat("[DT818_pro_hedge] Init. Streams S1=%d S2=%d S3=%d  Sessions LDN=%d NY=%d  "
                "Caps S1=%.1f/%.1f S2=%.1f/%.1f S3=%.1f/%.1f",
                _ORB_S1_Enabled, _ORB_S2_Enabled, _ORB_S3_Enabled,
                _ORB_LDN_Enabled, _ORB_NY_Enabled,
                _ORB_S1_DailyTargetPct, _ORB_S1_DailyLossPct,
                _ORB_S2_DailyTargetPct, _ORB_S2_DailyLossPct,
                _ORB_S3_DailyTargetPct, _ORB_S3_DailyLossPct);
+   PrintFormat("[DT818_pro_hedge] Hedge sub-streams h1=%d h2=%d h3=%d  "
+               "global cfg buf=%d/%d/%d sl=%d/%d/%d rr=%.1f/%.1f/%.1f exp=%d/%d/%d",
+               _HEDGE_S1_Enabled, _HEDGE_S2_Enabled, _HEDGE_S3_Enabled,
+               _HEDGE_S1_BufferPts, _HEDGE_S2_BufferPts, _HEDGE_S3_BufferPts,
+               _HEDGE_S1_FixedSL_Pts, _HEDGE_S2_FixedSL_Pts, _HEDGE_S3_FixedSL_Pts,
+               _HEDGE_S1_RR_Ratio, _HEDGE_S2_RR_Ratio, _HEDGE_S3_RR_Ratio,
+               _HEDGE_S1_ExpireMinutes, _HEDGE_S2_ExpireMinutes, _HEDGE_S3_ExpireMinutes);
    return INIT_SUCCEEDED;
 }
 
@@ -571,5 +837,17 @@ void OnTick()
    if(!s1_locked) ProcessORBStream(g_cfg_s1, g_s1_ldn, g_s1_ny);
    if(!s2_locked) ProcessORBStream(g_cfg_s2, g_s2_ldn, g_s2_ny);
    if(!s3_locked) ProcessORBStream(g_cfg_s3, g_s3_ldn, g_s3_ny);
+
+   // Hedge sub-streams: scan history for parent SL hits and place opposite-direction
+   // LIMIT orders. Each hedge has independent magic + daily-cap state.
+   bool h1_locked = StreamDailyCapsCheck(_HEDGE_S1_Magic, 0.0, _HEDGE_S1_DailyLossPct,
+                                          g_hs1_day, g_hs1_bal_start, g_hs1_lock);
+   bool h2_locked = StreamDailyCapsCheck(_HEDGE_S2_Magic, 0.0, _HEDGE_S2_DailyLossPct,
+                                          g_hs2_day, g_hs2_bal_start, g_hs2_lock);
+   bool h3_locked = StreamDailyCapsCheck(_HEDGE_S3_Magic, 0.0, _HEDGE_S3_DailyLossPct,
+                                          g_hs3_day, g_hs3_bal_start, g_hs3_lock);
+   if(!h1_locked) ProcessHedgeStream(g_hedge_s1);
+   if(!h2_locked) ProcessHedgeStream(g_hedge_s2);
+   if(!h3_locked) ProcessHedgeStream(g_hedge_s3);
 }
 //+------------------------------------------------------------------+

@@ -12,7 +12,11 @@ import pandas as pd
 # Standard sim spread (pts) — applied to loaded ticks by default.
 # Real Vantage XAUUSD avg is ~25 pts; 70 is conservative for live execution variance.
 # Pass spread_pts=0 to load_ticks for raw real-tick spreads.
-SIM_SPREAD_PTS = 70
+# Default sim spread: 55pt = ~35pt assumed worst spread + 2x10pt slippage proxy.
+# Empirical Vantage XAUUSD max-observed = 32pt; this is conservative friction
+# tuning so WFO winners are robust to real broker friction. Override per-call
+# with spread_pts=23 for live-match calibration, =0 to use real recorded spreads.
+SIM_SPREAD_PTS = 55
 XAUUSD_POINT = 0.01
 
 
@@ -69,6 +73,10 @@ def _pull_bars(symbol: str, tf: str, start: datetime, end: datetime) -> pd.DataF
         "H1": mt5.TIMEFRAME_H1,
         "H4": mt5.TIMEFRAME_H4,
     }
+    # Prime via copy_rates_from_pos — MT5 needs to page in bars before range queries
+    # work reliably, especially for the most recent days. 20000 bars handles M1 up to
+    # ~2 weeks back. Without this, copy_rates_range can silently return 0 bars.
+    _ = mt5.copy_rates_from_pos(symbol, tf_map[tf], 0, 20000)
     arr = mt5.copy_rates_range(symbol, tf_map[tf], start, end)
     if arr is None or len(arr) == 0:
         raise RuntimeError(f"No bars for {symbol} {tf}: {mt5.last_error()}")
@@ -95,7 +103,7 @@ def load_ticks(symbol: str, start: datetime, end: datetime,
     """Load ticks [start, end) UTC. Caches per-month in parquet.
 
     spread_pts: synthetic fixed spread to apply (overrides real bid/ask).
-                None (default) = use SIM_SPREAD_PTS module constant (60).
+                None (default) = use SIM_SPREAD_PTS module constant (currently 55).
                 0 = preserve real recorded spreads.
     """
     CACHE_DIR.mkdir(parents=True, exist_ok=True)

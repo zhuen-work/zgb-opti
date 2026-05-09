@@ -1,6 +1,7 @@
 #!/bin/bash
-# Chained sequential WFO runner. Launches each WFO; if a WFO crashes,
-# logs the error and continues to the next. Final phase E always runs.
+# DT818_pro WFO chain — per-session (LDN + NY) with two phases each.
+# Phase 1: entry sweep (caps=0).  Phase 2: cap sweep with entry winner fixed.
+# Final: portfolio Phase E (deal-merges per-session winners).
 set -u
 cd c:/Users/Zhu-En/zgb-opti
 
@@ -9,28 +10,20 @@ mkdir -p "$LOGDIR"
 
 run() {
     local name=$1
-    local script=$2
+    shift
     echo "===================================" | tee -a "$LOGDIR/wfo_chain.log"
-    echo "$(date +%H:%M:%S) Launching $name WFO" | tee -a "$LOGDIR/wfo_chain.log"
+    echo "$(date +%H:%M:%S) Launching $name" | tee -a "$LOGDIR/wfo_chain.log"
     echo "===================================" | tee -a "$LOGDIR/wfo_chain.log"
-    python -u "$script" 2>&1 | tee "$LOGDIR/wfo_${name,,}_may2.log"
+    python -u "$@" 2>&1 | tee "$LOGDIR/${name,,}.log"
     local rc=$?
-    echo "$(date +%H:%M:%S) $name WFO exit=$rc" | tee -a "$LOGDIR/wfo_chain.log"
-    return 0  # always continue
+    echo "$(date +%H:%M:%S) $name exit=$rc" | tee -a "$LOGDIR/wfo_chain.log"
+    return 0
 }
 
-# ORB already running externally — wait for its winner.json
-echo "$(date +%H:%M:%S) Waiting for ORB WFO to complete..." | tee -a "$LOGDIR/wfo_chain.log"
-until [ -f "output/wfo_orb_spread70_may2/winner.json" ]; do sleep 30; done
-echo "$(date +%H:%M:%S) ORB winner detected — continuing chain" | tee -a "$LOGDIR/wfo_chain.log"
+run "ORB_LDN_P1"  scripts/sim_wfo_orb.py --session ldn --phase 1
+run "ORB_LDN_P2"  scripts/sim_wfo_orb.py --session ldn --phase 2
+run "ORB_NY_P1"   scripts/sim_wfo_orb.py --session ny  --phase 1
+run "ORB_NY_P2"   scripts/sim_wfo_orb.py --session ny  --phase 2
+run "PhaseE"      scripts/sim_dt818_pro_phase_e.py
 
-run "EMP"    scripts/sim_wfo_ema_pullback.py
-run "FBO_S1" scripts/sim_wfo_fbo_s1.py
-run "FBO_S2" scripts/sim_wfo_fbo_s2.py
-run "LSFVG"  scripts/sim_wfo_lsfvg.py
-
-echo "===================================" | tee -a "$LOGDIR/wfo_chain.log"
-echo "$(date +%H:%M:%S) All WFOs done. Running Phase E..." | tee -a "$LOGDIR/wfo_chain.log"
-echo "===================================" | tee -a "$LOGDIR/wfo_chain.log"
-python -u scripts/sim_dt818_pro_phase_e.py 2>&1 | tee "$LOGDIR/phase_e_may2.log"
-echo "$(date +%H:%M:%S) DONE — chain complete" | tee -a "$LOGDIR/wfo_chain.log"
+echo "$(date +%H:%M:%S) DONE - chain complete" | tee -a "$LOGDIR/wfo_chain.log"

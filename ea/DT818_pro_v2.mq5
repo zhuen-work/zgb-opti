@@ -1,22 +1,16 @@
 //+------------------------------------------------------------------+
-//| DT818_pro.mq5                                                     |
-//| ORB EA: 3-stream rank-portfolio (S1 + S2 + S3)                    |
+//| DT818_pro_v2.mq5                                                  |
+//| ORB EA: 6-stream rank-portfolio (S1..S6, no hedge)                |
 //|                                                                   |
-//| Each stream runs the ORB strategy with DIFFERENT params (top 3    |
-//| ranks from the joint-session WFO). All streams trade BOTH LDN     |
-//| and NY sessions. Per-stream magic + caps; one stream's lock       |
-//| does not affect others.                                            |
+//| Weekly cadence (Sat Malaysia time reopt):                         |
+//|   S1/S2/S3: top 3 ranks from PREVIOUS-week WFO (proven, aging)    |
+//|   S4/S5/S6: top 3 ranks from CURRENT-week WFO (fresh)             |
 //|                                                                   |
-//|   ORB_S1 (magic 1111): rank 1 cfg                                 |
-//|   ORB_S2 (magic 2222): rank 2 cfg                                 |
-//|   ORB_S3 (magic 3333): rank 3 cfg                                 |
+//| Magics: 1111/2222/3333 (previous) + 4444/5555/6666 (current)      |
+//| Avoids 5111/5222/5333 (reserved for hedge EA).                    |
 //|                                                                   |
-//| Risk allocation: setfile _RiskPct = total_risk / 3 so total       |
-//| per-setup exposure = _RiskPct × 3 when all streams enter together.|
-//|                                                                   |
-//| FBO removed 2026-05-03. LSFVG removed 2026-05-03. EMP removed     |
-//| 2026-05-02. Session split (LDN/NY streams) replaced by rank split |
-//| 2026-05-03 — Phase E showed rank portfolio NP/DD$ wins decisively.|
+//| Risk allocation: setfile _RiskPct = total_risk / 6 so total       |
+//| per-setup exposure = _RiskPct × 6 when all streams enter together.|
 //+------------------------------------------------------------------+
 #property copyright "ZGB Trading"
 #property version   "1.00"
@@ -93,6 +87,48 @@ input double  _ORB_S3_DailyTargetPct       = 0.0;
 input double  _ORB_S3_DailyLossPct         = 0.0;
 
 //====================================================================
+// ORB_S4 — previous-week rank 1 stream (magic 4444)
+//====================================================================
+input bool    _ORB_S4_Enabled              = true;
+input int     _ORB_S4_Magic                = 4444;
+input string  _ORB_S4_Comment              = "ORB_S4";
+input int     _ORB_S4_RangeMinutes         = 90;
+input int     _ORB_S4_FixedSL_Pts          = 500;
+input double  _ORB_S4_RR_Ratio             = 4.0;
+input double  _ORB_S4_HalfTP_Ratio         = 0.25;
+input int     _ORB_S4_PendingExpireMinutes = 240;
+input double  _ORB_S4_DailyTargetPct       = 0.0;
+input double  _ORB_S4_DailyLossPct         = 0.0;
+
+//====================================================================
+// ORB_S5 — previous-week rank 2 stream (magic 5555)
+//====================================================================
+input bool    _ORB_S5_Enabled              = true;
+input int     _ORB_S5_Magic                = 5555;
+input string  _ORB_S5_Comment              = "ORB_S5";
+input int     _ORB_S5_RangeMinutes         = 90;
+input int     _ORB_S5_FixedSL_Pts          = 400;
+input double  _ORB_S5_RR_Ratio             = 4.0;
+input double  _ORB_S5_HalfTP_Ratio         = 0.0;
+input int     _ORB_S5_PendingExpireMinutes = 240;
+input double  _ORB_S5_DailyTargetPct       = 0.0;
+input double  _ORB_S5_DailyLossPct         = 0.0;
+
+//====================================================================
+// ORB_S6 — previous-week rank 3 stream (magic 6666)
+//====================================================================
+input bool    _ORB_S6_Enabled              = true;
+input int     _ORB_S6_Magic                = 6666;
+input string  _ORB_S6_Comment              = "ORB_S6";
+input int     _ORB_S6_RangeMinutes         = 90;
+input int     _ORB_S6_FixedSL_Pts          = 350;
+input double  _ORB_S6_RR_Ratio             = 4.0;
+input double  _ORB_S6_HalfTP_Ratio         = 0.5;
+input int     _ORB_S6_PendingExpireMinutes = 240;
+input double  _ORB_S6_DailyTargetPct       = 0.0;
+input double  _ORB_S6_DailyLossPct         = 0.0;
+
+//====================================================================
 // Globals
 //====================================================================
 datetime g_lastBar_M1 = 0;       // shared M1 bar tracker
@@ -114,6 +150,9 @@ struct ORBStreamCfg
 ORBStreamCfg g_cfg_s1;
 ORBStreamCfg g_cfg_s2;
 ORBStreamCfg g_cfg_s3;
+ORBStreamCfg g_cfg_s4;
+ORBStreamCfg g_cfg_s5;
+ORBStreamCfg g_cfg_s6;
 
 // ORB session state (per-day state — range, fired flag, pending expiry)
 struct ORBSession
@@ -126,15 +165,21 @@ struct ORBSession
    double     range_high;
    double     range_low;
 };
-// Each stream has its OWN LDN + NY session state (3 streams × 2 sessions = 6 states)
+// Each stream has its OWN LDN + NY session state (6 streams × 2 sessions = 12 states)
 ORBSession g_s1_ldn = {0};   ORBSession g_s1_ny = {0};
 ORBSession g_s2_ldn = {0};   ORBSession g_s2_ny = {0};
 ORBSession g_s3_ldn = {0};   ORBSession g_s3_ny = {0};
+ORBSession g_s4_ldn = {0};   ORBSession g_s4_ny = {0};
+ORBSession g_s5_ldn = {0};   ORBSession g_s5_ny = {0};
+ORBSession g_s6_ldn = {0};   ORBSession g_s6_ny = {0};
 
 // Per-stream daily-cap state (independent rollover + lock per stream magic)
 datetime g_s1_day = 0;   double g_s1_bal_start = 0.0;   bool g_s1_lock = false;
 datetime g_s2_day = 0;   double g_s2_bal_start = 0.0;   bool g_s2_lock = false;
 datetime g_s3_day = 0;   double g_s3_bal_start = 0.0;   bool g_s3_lock = false;
+datetime g_s4_day = 0;   double g_s4_bal_start = 0.0;   bool g_s4_lock = false;
+datetime g_s5_day = 0;   double g_s5_bal_start = 0.0;   bool g_s5_lock = false;
+datetime g_s6_day = 0;   double g_s6_bal_start = 0.0;   bool g_s6_lock = false;
 
 //====================================================================
 // Helpers
@@ -523,20 +568,54 @@ int OnInit()
    g_cfg_s3.daily_target_pct       = _ORB_S3_DailyTargetPct;
    g_cfg_s3.daily_loss_pct         = _ORB_S3_DailyLossPct;
 
+   g_cfg_s4.enabled                = _ORB_S4_Enabled;
+   g_cfg_s4.magic                  = _ORB_S4_Magic;
+   g_cfg_s4.comment                = _ORB_S4_Comment;
+   g_cfg_s4.range_minutes          = _ORB_S4_RangeMinutes;
+   g_cfg_s4.fixed_sl_pts           = _ORB_S4_FixedSL_Pts;
+   g_cfg_s4.rr_ratio               = _ORB_S4_RR_Ratio;
+   g_cfg_s4.half_tp_ratio          = _ORB_S4_HalfTP_Ratio;
+   g_cfg_s4.pending_expire_minutes = _ORB_S4_PendingExpireMinutes;
+   g_cfg_s4.daily_target_pct       = _ORB_S4_DailyTargetPct;
+   g_cfg_s4.daily_loss_pct         = _ORB_S4_DailyLossPct;
+
+   g_cfg_s5.enabled                = _ORB_S5_Enabled;
+   g_cfg_s5.magic                  = _ORB_S5_Magic;
+   g_cfg_s5.comment                = _ORB_S5_Comment;
+   g_cfg_s5.range_minutes          = _ORB_S5_RangeMinutes;
+   g_cfg_s5.fixed_sl_pts           = _ORB_S5_FixedSL_Pts;
+   g_cfg_s5.rr_ratio               = _ORB_S5_RR_Ratio;
+   g_cfg_s5.half_tp_ratio          = _ORB_S5_HalfTP_Ratio;
+   g_cfg_s5.pending_expire_minutes = _ORB_S5_PendingExpireMinutes;
+   g_cfg_s5.daily_target_pct       = _ORB_S5_DailyTargetPct;
+   g_cfg_s5.daily_loss_pct         = _ORB_S5_DailyLossPct;
+
+   g_cfg_s6.enabled                = _ORB_S6_Enabled;
+   g_cfg_s6.magic                  = _ORB_S6_Magic;
+   g_cfg_s6.comment                = _ORB_S6_Comment;
+   g_cfg_s6.range_minutes          = _ORB_S6_RangeMinutes;
+   g_cfg_s6.fixed_sl_pts           = _ORB_S6_FixedSL_Pts;
+   g_cfg_s6.rr_ratio               = _ORB_S6_RR_Ratio;
+   g_cfg_s6.half_tp_ratio          = _ORB_S6_HalfTP_Ratio;
+   g_cfg_s6.pending_expire_minutes = _ORB_S6_PendingExpireMinutes;
+   g_cfg_s6.daily_target_pct       = _ORB_S6_DailyTargetPct;
+   g_cfg_s6.daily_loss_pct         = _ORB_S6_DailyLossPct;
+
    g_lastBar_M1 = iTime(_Symbol, PERIOD_M1, 0);
 
    double bal = AccountInfoDouble(ACCOUNT_BALANCE);
    g_s1_bal_start = bal;
    g_s2_bal_start = bal;
    g_s3_bal_start = bal;
+   g_s4_bal_start = bal;
+   g_s5_bal_start = bal;
+   g_s6_bal_start = bal;
 
-   PrintFormat("[DT818_pro] Init. Streams S1=%d S2=%d S3=%d  Sessions LDN=%d NY=%d  "
-               "Caps S1=%.1f/%.1f S2=%.1f/%.1f S3=%.1f/%.1f",
+   PrintFormat("[DT818_pro_v2] Init. Streams S1=%d S2=%d S3=%d S4=%d S5=%d S6=%d  "
+               "Sessions LDN=%d NY=%d",
                _ORB_S1_Enabled, _ORB_S2_Enabled, _ORB_S3_Enabled,
-               _ORB_LDN_Enabled, _ORB_NY_Enabled,
-               _ORB_S1_DailyTargetPct, _ORB_S1_DailyLossPct,
-               _ORB_S2_DailyTargetPct, _ORB_S2_DailyLossPct,
-               _ORB_S3_DailyTargetPct, _ORB_S3_DailyLossPct);
+               _ORB_S4_Enabled, _ORB_S5_Enabled, _ORB_S6_Enabled,
+               _ORB_LDN_Enabled, _ORB_NY_Enabled);
    return INIT_SUCCEEDED;
 }
 
@@ -566,10 +645,22 @@ void OnTick()
    bool s3_locked = StreamDailyCapsCheck(_ORB_S3_Magic, _ORB_S3_DailyTargetPct,
                                           _ORB_S3_DailyLossPct,
                                           g_s3_day, g_s3_bal_start, g_s3_lock);
+   bool s4_locked = StreamDailyCapsCheck(_ORB_S4_Magic, _ORB_S4_DailyTargetPct,
+                                          _ORB_S4_DailyLossPct,
+                                          g_s4_day, g_s4_bal_start, g_s4_lock);
+   bool s5_locked = StreamDailyCapsCheck(_ORB_S5_Magic, _ORB_S5_DailyTargetPct,
+                                          _ORB_S5_DailyLossPct,
+                                          g_s5_day, g_s5_bal_start, g_s5_lock);
+   bool s6_locked = StreamDailyCapsCheck(_ORB_S6_Magic, _ORB_S6_DailyTargetPct,
+                                          _ORB_S6_DailyLossPct,
+                                          g_s6_day, g_s6_bal_start, g_s6_lock);
 
    // Each stream processes both LDN and NY sessions internally.
    if(!s1_locked) ProcessORBStream(g_cfg_s1, g_s1_ldn, g_s1_ny);
    if(!s2_locked) ProcessORBStream(g_cfg_s2, g_s2_ldn, g_s2_ny);
    if(!s3_locked) ProcessORBStream(g_cfg_s3, g_s3_ldn, g_s3_ny);
+   if(!s4_locked) ProcessORBStream(g_cfg_s4, g_s4_ldn, g_s4_ny);
+   if(!s5_locked) ProcessORBStream(g_cfg_s5, g_s5_ldn, g_s5_ny);
+   if(!s6_locked) ProcessORBStream(g_cfg_s6, g_s6_ldn, g_s6_ny);
 }
 //+------------------------------------------------------------------+

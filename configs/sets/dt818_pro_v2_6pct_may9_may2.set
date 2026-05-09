@@ -1,0 +1,109 @@
+; DT818_pro_v2 - 6-stream ORB rank portfolio (no hedge), 6.0% total per setup
+; Generated 2026-05-09
+;
+; Architecture (weekly Sat reopt):
+;   S1/S2/S3 (magics 1111/2222/3333): PREVIOUS-week WFO top 3 (MAY2)
+;   S4/S5/S6 (magics 4444/5555/6666): CURRENT-week  WFO top 3 (MAY9)
+; _RiskPct = 1.0 per stream so total when all 6 fire together = 6.0%.
+;
+; PREVIOUS week (wfo_orb_may2):
+;   S1 rank 1: Range=90/SL=500/RR=4.0/HTP=0.25  P0=PASS slope=+78%
+;   S2 rank 2: Range=90/SL=400/RR=4.0/HTP=0.0   P0=PASS slope=+52%
+;   S3 rank 3: Range=90/SL=350/RR=4.0/HTP=0.5   P0=PASS slope=+4%
+;
+; CURRENT week (wfo_orb_may9):
+;   S4 rank 1: Range=90/SL=650/RR=4.0/HTP=0.25  P0=PASS slope=+24%
+;   S5 rank 2: Range=90/SL=350/RR=4.0/HTP=0.5   P0=FAIL slope=-71%
+;   S6 rank 3: Range=90/SL=400/RR=4.0/HTP=0.5   P0=FAIL slope=-75%
+;
+; Spread guard: _MaxSpreadPts=50 (Vantage max observed 32pt)
+
+; ===== Global account =====
+_CapitalProtectionAmount=0.0||0.0||1||0.0||0.0||N
+_RiskPct=1.0||1.0||1||1.0||1.0||N
+_LotMode=1||1||1||1||1||N
+TierBase=2000||2000||1||2000||2000||N
+LotStep=0.01||0.01||1||0.01||0.01||N
+_MaxSpreadPts=50||50||1||50||50||N
+
+; ===== ORB shared params =====
+_BrokerGMTOffsetHours=0||0||1||0||0||N  ; DEPRECATED post 2026-05-07 (EA uses TimeGMT)
+_ORB_BufferPts=0||0||1||0||0||N
+_ORB_MinRangePts=200||200||1||200||200||N
+_ORB_MaxRangePts=5000||5000||1||5000||5000||N
+_ORB_LDN_Enabled=true
+_ORB_LDN_StartHour=7||7||1||7||7||N
+_ORB_NY_Enabled=true
+_ORB_NY_StartHour=13||13||1||13||13||N
+
+; ===== ORB_S1 -- PREVIOUS week (MAY2) rank 1 (magic 1111) =====
+_ORB_S1_Enabled=true
+_ORB_S1_Magic=1111||1111||1||1111||1111||N
+_ORB_S1_Comment=ORB_S1
+_ORB_S1_RangeMinutes=90||90||1||90||90||N
+_ORB_S1_FixedSL_Pts=500||500||1||500||500||N
+_ORB_S1_RR_Ratio=4.0||4.0||1||4.0||4.0||N
+_ORB_S1_HalfTP_Ratio=0.25||0.25||1||0.25||0.25||N
+_ORB_S1_PendingExpireMinutes=240||240||1||240||240||N
+_ORB_S1_DailyTargetPct=0.0||0.0||1||0.0||0.0||N
+_ORB_S1_DailyLossPct=0.0||0.0||1||0.0||0.0||N
+
+; ===== ORB_S2 -- PREVIOUS week (MAY2) rank 2 (magic 2222) =====
+_ORB_S2_Enabled=true
+_ORB_S2_Magic=2222||2222||1||2222||2222||N
+_ORB_S2_Comment=ORB_S2
+_ORB_S2_RangeMinutes=90||90||1||90||90||N
+_ORB_S2_FixedSL_Pts=400||400||1||400||400||N
+_ORB_S2_RR_Ratio=4.0||4.0||1||4.0||4.0||N
+_ORB_S2_HalfTP_Ratio=0.0||0.0||1||0.0||0.0||N
+_ORB_S2_PendingExpireMinutes=240||240||1||240||240||N
+_ORB_S2_DailyTargetPct=0.0||0.0||1||0.0||0.0||N
+_ORB_S2_DailyLossPct=0.0||0.0||1||0.0||0.0||N
+
+; ===== ORB_S3 -- PREVIOUS week (MAY2) rank 3 (magic 3333) =====
+_ORB_S3_Enabled=true
+_ORB_S3_Magic=3333||3333||1||3333||3333||N
+_ORB_S3_Comment=ORB_S3
+_ORB_S3_RangeMinutes=90||90||1||90||90||N
+_ORB_S3_FixedSL_Pts=350||350||1||350||350||N
+_ORB_S3_RR_Ratio=4.0||4.0||1||4.0||4.0||N
+_ORB_S3_HalfTP_Ratio=0.5||0.5||1||0.5||0.5||N
+_ORB_S3_PendingExpireMinutes=240||240||1||240||240||N
+_ORB_S3_DailyTargetPct=0.0||0.0||1||0.0||0.0||N
+_ORB_S3_DailyLossPct=0.0||0.0||1||0.0||0.0||N
+
+; ===== ORB_S4 -- CURRENT week (MAY9) rank 1 (magic 4444) =====
+_ORB_S4_Enabled=true
+_ORB_S4_Magic=4444||4444||1||4444||4444||N
+_ORB_S4_Comment=ORB_S4
+_ORB_S4_RangeMinutes=90||90||1||90||90||N
+_ORB_S4_FixedSL_Pts=650||650||1||650||650||N
+_ORB_S4_RR_Ratio=4.0||4.0||1||4.0||4.0||N
+_ORB_S4_HalfTP_Ratio=0.25||0.25||1||0.25||0.25||N
+_ORB_S4_PendingExpireMinutes=240||240||1||240||240||N
+_ORB_S4_DailyTargetPct=0.0||0.0||1||0.0||0.0||N
+_ORB_S4_DailyLossPct=0.0||0.0||1||0.0||0.0||N
+
+; ===== ORB_S5 -- CURRENT week (MAY9) rank 2 (magic 5555) =====
+_ORB_S5_Enabled=true
+_ORB_S5_Magic=5555||5555||1||5555||5555||N
+_ORB_S5_Comment=ORB_S5
+_ORB_S5_RangeMinutes=90||90||1||90||90||N
+_ORB_S5_FixedSL_Pts=350||350||1||350||350||N
+_ORB_S5_RR_Ratio=4.0||4.0||1||4.0||4.0||N
+_ORB_S5_HalfTP_Ratio=0.5||0.5||1||0.5||0.5||N
+_ORB_S5_PendingExpireMinutes=240||240||1||240||240||N
+_ORB_S5_DailyTargetPct=0.0||0.0||1||0.0||0.0||N
+_ORB_S5_DailyLossPct=0.0||0.0||1||0.0||0.0||N
+
+; ===== ORB_S6 -- CURRENT week (MAY9) rank 3 (magic 6666) =====
+_ORB_S6_Enabled=true
+_ORB_S6_Magic=6666||6666||1||6666||6666||N
+_ORB_S6_Comment=ORB_S6
+_ORB_S6_RangeMinutes=90||90||1||90||90||N
+_ORB_S6_FixedSL_Pts=400||400||1||400||400||N
+_ORB_S6_RR_Ratio=4.0||4.0||1||4.0||4.0||N
+_ORB_S6_HalfTP_Ratio=0.5||0.5||1||0.5||0.5||N
+_ORB_S6_PendingExpireMinutes=240||240||1||240||240||N
+_ORB_S6_DailyTargetPct=0.0||0.0||1||0.0||0.0||N
+_ORB_S6_DailyLossPct=0.0||0.0||1||0.0||0.0||N

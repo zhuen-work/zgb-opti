@@ -1,25 +1,16 @@
-; DT818_pro - 3-stream ORB rank portfolio (S1 + S2 + S3), 3% total per setup
+; DT818_pro - 3-stream ORB rank portfolio, 9% total per setup (EXTREME RISK)
 ; Next WFO: May 16 2026
 ;
+; ** WARNING: EXTREME risk. Expect 30-50% live DD. Only for accounts that can
+; ** absorb major drawdowns AND psychologically handle 6-figure equity swings.
+;
 ; Architecture: top 3 ranks from May 2 joint-session WFO running in parallel.
+; _RiskPct = 3.0 per stream so total when all 3 fire together = 9.0%.
 ; Each stream has both LDN and NY enabled. Independent magics + caps.
-; _RiskPct = 1.0 per stream so total when all 3 fire together = 3.0%.
-;
-; Phase E (76d, $10k, 55pt friction, 23pt live spread):
-;   Rank 1 only:    NP $13,240 / DD 10.2% / NP/DD$ 5.61
-;   Rank 1+2+3:     NP $20,437 / DD 9.3%  / NP/DD$ 7.19  ← +28% risk-adjusted, lower DD
-;
-; Stream params (May 2 reopt rank 1/2/3, all P0 PASS):
-;   S1 (rank 1, magic 1111): Range=90 SL=500 RR=4.0 HTP=0.25
-;   S2 (rank 2, magic 2222): Range=90 SL=400 RR=4.0 HTP=0.0
-;   S3 (rank 3, magic 3333): Range=90 SL=350 RR=4.0 HTP=0.5
-;
-; Spread guard: _MaxSpreadPts=50 (Vantage max observed 32pt; 50pt = 56% safety margin)
-; FBO removed 2026-05-03. LSFVG removed 2026-05-03. EMP removed 2026-05-02.
 
 ; ===== Global account =====
 _CapitalProtectionAmount=0.0||0.0||1||0.0||0.0||N
-_RiskPct=1.0||1.0||1||1.0||1.0||N
+_RiskPct=3.0||3.0||1||3.0||3.0||N
 _LotMode=1||1||1||1||1||N
 TierBase=2000||2000||1||2000||2000||N
 LotStep=0.01||0.01||1||0.01||0.01||N
