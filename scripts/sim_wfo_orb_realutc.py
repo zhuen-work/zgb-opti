@@ -50,18 +50,6 @@ N_WORKERS = 6
 SIGNAL_TF = "M5"
 PENDING_EXPIRE_MIN = 240  # match live DT818_pro setfile
 
-# !!! BROKER-TIME GOTCHA — read reference_vantage_broker_time.md !!!
-# MT5 (Vantage) returns timestamps in BROKER LOCAL TIME (currently UTC+3, EEST/DST).
-# Python labels them as UTC but they're actually broker-time epoch.
-# Below `ldn_start_hour=7` selects ticks where ts.hour == 7 in the broker-time
-# tick stream = REAL UTC 04:00 (Asian-quiet hour, NOT actual LDN session).
-# Similarly `ny_start_hour=13` = broker hour 13 = REAL UTC 10:00 (mid-LDN, not NY).
-# The live EA uses MQL5 TimeGMT() which IS real UTC, so live trades the actual
-# LDN (real UTC 07:00) and NY (real UTC 13:00) sessions — DIFFERENT from what
-# this WFO optimizes. To make the WFO match live, set ldn_start_hour=10 and
-# ny_start_hour=16 (broker labels for real UTC 07/13). See sim_wfo_orb_realutc.py
-# for that variant. Verified 2026-05-11.
-
 from zgb_sim.wfo_helpers import (WINDOWS_MAY9 as WINDOWS, rank_with_p0,
                                   print_phase_d_with_p0, select_winner_with_p0,
                                   check_winner_boundaries, print_boundary_check)
@@ -75,7 +63,7 @@ def session_flags(session: str):
     return (session in ("ldn", "both"), session in ("ny", "both"))
 
 
-DATE_TAG = "may9"  # bumped from may2 for the 2026-05-09 reopt
+DATE_TAG = "may9_realutc"  # bumped from may2 for the 2026-05-09 reopt
 
 def out_dir_for(session: str) -> Path:
     if session == "both":
@@ -93,8 +81,8 @@ def build_entry_grid(session: str, tiny=False) -> list[ORBConfig]:
             fixed_sl_pts=400, rr_ratio=3.0, half_tp_ratio=0.0,
             pending_expire_minutes=PENDING_EXPIRE_MIN,
             daily_target_pct=0.0, daily_loss_pct=0.0,
-            ldn_enabled=ldn_on, ldn_start_hour=7,
-            ny_enabled=ny_on, ny_start_hour=13,
+            ldn_enabled=ldn_on, ldn_start_hour=10,
+            ny_enabled=ny_on, ny_start_hour=16,
             comment="ORB",
         )]
     grid = []
@@ -114,8 +102,8 @@ def build_entry_grid(session: str, tiny=False) -> list[ORBConfig]:
                         pending_expire_minutes=PENDING_EXPIRE_MIN,
                         daily_target_pct=0.0,
                         daily_loss_pct=0.0,
-                        ldn_enabled=ldn_on, ldn_start_hour=7,
-                        ny_enabled=ny_on, ny_start_hour=13,
+                        ldn_enabled=ldn_on, ldn_start_hour=10,
+                        ny_enabled=ny_on, ny_start_hour=16,
                         comment="ORB",
                     ))
     return grid
@@ -139,8 +127,8 @@ def build_cap_grid(p1_winner_cfg: dict, session: str) -> list[ORBConfig]:
                 pending_expire_minutes=PENDING_EXPIRE_MIN,
                 daily_target_pct=tgt,
                 daily_loss_pct=loss,
-                ldn_enabled=ldn_on, ldn_start_hour=7,
-                ny_enabled=ny_on, ny_start_hour=13,
+                ldn_enabled=ldn_on, ldn_start_hour=10,
+                ny_enabled=ny_on, ny_start_hour=16,
                 comment="ORB",
             ))
     return grid
@@ -229,8 +217,8 @@ def select_robust(per_window, session: str = "both", top_n=30, max_candidates=15
             pending_expire_minutes=PENDING_EXPIRE_MIN,
             daily_target_pct=float(r["daily_target_pct"]),
             daily_loss_pct=float(r["daily_loss_pct"]),
-            ldn_enabled=ldn_on, ldn_start_hour=7,
-            ny_enabled=ny_on, ny_start_hour=13,
+            ldn_enabled=ldn_on, ldn_start_hour=10,
+            ny_enabled=ny_on, ny_start_hour=16,
             comment="ORB",
         ))
         print(f"    #{len(cands)} Range={k[0]} FixSL={k[2]} RR={k[3]} HTP={k[4]} "

@@ -53,6 +53,9 @@ MAY2_TOP6_CFGS = [
 
 
 def make_cfg(d: dict, risk_pct: float, comment: str) -> ORBConfig:
+    # NOTE: ldn=7/ny=13 are BROKER-time hours. With Vantage at UTC+3 these
+    # are REAL UTC 04/10 (Asian+Indian), NOT real LDN/NY (07/13) that live trades.
+    # See reference_vantage_broker_time.md.
     return ORBConfig(
         risk_pct=risk_pct,
         range_minutes=d["range_minutes"],

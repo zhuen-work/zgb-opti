@@ -72,6 +72,10 @@ class HedgeCfg:
 
 def make_stream_cfg(stream: str, risk_pct: float) -> ORBConfig:
     sc = STREAM_CFGS[stream]
+    # NOTE: ldn=7/ny=13 are BROKER-time hours; with Vantage at UTC+3 these
+    # select REAL UTC 04:00 / 10:00, NOT actual LDN/NY. See
+    # reference_vantage_broker_time.md. Live EA uses TimeGMT() = real UTC,
+    # so live trades a different session than this sim optimizes.
     return ORBConfig(
         risk_pct=risk_pct,
         range_minutes=sc["range_minutes"],

@@ -32,9 +32,9 @@ _ORB_BufferPts=0||0||1||0||0||N
 _ORB_MinRangePts=200||200||1||200||200||N
 _ORB_MaxRangePts=5000||5000||1||5000||5000||N
 _ORB_LDN_Enabled=true
-_ORB_LDN_StartHour=7||7||1||7||7||N
+_ORB_LDN_StartHour=4||4||1||4||4||N
 _ORB_NY_Enabled=true
-_ORB_NY_StartHour=13||13||1||13||13||N
+_ORB_NY_StartHour=10||10||1||10||10||N
 
 ; ===== ORB_S1 -- PREVIOUS week (MAY2) rank 1 (magic 1111) =====
 _ORB_S1_Enabled=true

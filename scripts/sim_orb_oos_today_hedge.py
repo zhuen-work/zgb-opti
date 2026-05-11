@@ -112,6 +112,9 @@ def main():
             # Build parent configs
             cfgs = []
             for r in rows:
+                # NOTE: ldn=7/ny=13 are BROKER hours; with Vantage at UTC+3
+                # these are REAL UTC 04/10 (NOT real LDN/NY). See
+                # reference_vantage_broker_time.md.
                 cfg = ORBConfig(
                     risk_pct=per_stream, range_minutes=r["range_minutes"],
                     buffer_pts=0, min_range_pts=200, max_range_pts=5000,

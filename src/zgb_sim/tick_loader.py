@@ -19,6 +19,19 @@ import pandas as pd
 SIM_SPREAD_PTS = 55
 XAUUSD_POINT = 0.01
 
+# Per-symbol point + default sim-spread (pts) used when caller passes no override.
+# Add new symbols here as they get pulled.
+SYMBOL_POINT = {
+    "XAUUSD": 0.01,
+    "XAUUSD.sc": 0.01,
+    "NAS100.r": 0.01,   # Vantage mini index CFD
+}
+SYMBOL_DEFAULT_SPREAD_PTS = {
+    "XAUUSD": 55,        # gold default (matches SIM_SPREAD_PTS)
+    "XAUUSD.sc": 55,
+    "NAS100.r": 250,     # measured median 180, p99 220 (2026-04 -> 2026-05)
+}
+
 
 def kill_mt5_terminal() -> None:
     """Kill any running terminal64.exe (MT5). Safe to call when none running."""
@@ -196,10 +209,14 @@ def load_ticks(symbol: str, start: datetime, end: datetime,
     end_utc = end if end.tzinfo else end.replace(tzinfo=timezone.utc)
     ticks = ticks[(ticks["ts"] >= start_utc) & (ticks["ts"] < end_utc)].reset_index(drop=True)
 
-    # Apply standard sim spread override
-    eff_spread = SIM_SPREAD_PTS if spread_pts is None else spread_pts
-    if eff_spread > 0 and symbol == "XAUUSD":
-        ticks = _apply_spread_override(ticks, eff_spread, XAUUSD_POINT)
+    # Apply standard sim spread override (per-symbol default if caller passed None).
+    if spread_pts is None:
+        eff_spread = SYMBOL_DEFAULT_SPREAD_PTS.get(symbol, SIM_SPREAD_PTS)
+    else:
+        eff_spread = spread_pts
+    point = SYMBOL_POINT.get(symbol)
+    if eff_spread > 0 and point is not None:
+        ticks = _apply_spread_override(ticks, eff_spread, point)
     return ticks
 
 

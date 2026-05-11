@@ -127,6 +127,11 @@ def fetch_meta(symbol: str | None, account: str = "sim"):
 
 
 def row_to_cfg(row, comment: str, risk_pct: float) -> ORBConfig:
+    # NOTE: ldn_start_hour=7 / ny_start_hour=13 are BROKER hours.
+    # With Vantage at UTC+3 these are REAL UTC 04:00 and 10:00 (Asian + Indian),
+    # NOT the LDN/NY sessions live EA actually trades (real UTC 07/13).
+    # Sim PnL here will NOT match live PnL even on the same day. See
+    # reference_vantage_broker_time.md.
     return ORBConfig(
         risk_pct=risk_pct,
         range_minutes=int(row["range_minutes"]),
