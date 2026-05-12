@@ -20,14 +20,14 @@ EXPECTED = {
     "S6": {"src": "MAY9 R3", "RangeMinutes": 90, "FixedSL_Pts": 400, "RR_Ratio": 4.0, "HalfTP_Ratio": 0.5,  "Magic": 6666},
 }
 RISK_BY_FILE = {
-    "dt818_pro_v2_3pct_may9_may2.set": 0.5,
-    "dt818_pro_v2_6pct_may9_may2.set": 1.0,
-    "dt818_pro_v2_9pct_may9_may2.set": 1.5,
+    "dt818_pro_v2.1_3pct_may9_may2.set": 0.5,
+    "dt818_pro_v2.1_6pct_may9_may2.set": 1.0,
+    "dt818_pro_v2.1_9pct_may9_may2.set": 1.5,
 }
 TOTAL_BY_FILE = {
-    "dt818_pro_v2_3pct_may9_may2.set": 3.0,
-    "dt818_pro_v2_6pct_may9_may2.set": 6.0,
-    "dt818_pro_v2_9pct_may9_may2.set": 9.0,
+    "dt818_pro_v2.1_3pct_may9_may2.set": 3.0,
+    "dt818_pro_v2.1_6pct_may9_may2.set": 6.0,
+    "dt818_pro_v2.1_9pct_may9_may2.set": 9.0,
 }
 
 

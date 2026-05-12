@@ -1,10 +1,10 @@
-; DT818_pro_v2 - 6-stream ORB rank portfolio (no hedge), 3.0% total per setup
+; DT818_pro_v2.1 - 6-stream ORB rank portfolio (no hedge), 6.0% total per setup
 ; Generated 2026-05-09
 ;
 ; Architecture (weekly Sat reopt):
 ;   S1/S2/S3 (magics 1111/2222/3333): PREVIOUS-week WFO top 3 (MAY2)
 ;   S4/S5/S6 (magics 4444/5555/6666): CURRENT-week  WFO top 3 (MAY9)
-; _RiskPct = 0.5 per stream so total when all 6 fire together = 3.0%.
+; _RiskPct = 1.0 per stream so total when all 6 fire together = 6.0%.
 ;
 ; PREVIOUS week (wfo_orb_may2):
 ;   S1 rank 1: Range=90/SL=500/RR=4.0/HTP=0.25  P0=PASS slope=+78%
@@ -20,7 +20,7 @@
 
 ; ===== Global account =====
 _CapitalProtectionAmount=0.0||0.0||1||0.0||0.0||N
-_RiskPct=0.5||0.5||1||0.5||0.5||N
+_RiskPct=1.0||1.0||1||1.0||1.0||N
 _LotMode=1||1||1||1||1||N
 TierBase=2000||2000||1||2000||2000||N
 LotStep=0.01||0.01||1||0.01||0.01||N
