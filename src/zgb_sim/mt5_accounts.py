@@ -21,11 +21,11 @@ class AccountSpec:
 
 ACCOUNTS: dict[str, AccountSpec] = {
     "live": AccountSpec(
-        login=23836999,
-        server="VantageInternational-Live 11",
+        login=21478621,
+        server="VantageInternational-Live 3",
         symbol="XAUUSD.sc",
         purpose="live",
-        description="Zhu En Ling — production trading account; what live_check + EA run against",
+        description="Production trading account (updated 2026-05-12); what live_check + EA run against. Was 23836999 on Live 11 before. Symbol is XAUUSD.sc (account only has .sc variant; sim account on same server has plain XAUUSD).",
     ),
     "sim": AccountSpec(
         login=18912087,
