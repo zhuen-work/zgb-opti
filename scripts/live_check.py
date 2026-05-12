@@ -36,12 +36,16 @@ DEFAULT_SYMBOL = "XAUUSD"
 # and will fall through to the "m<magic>" fallback labelling.
 STREAM_NAMES = {1111: "ORB_S1", 2222: "ORB_S2", 3333: "ORB_S3",
                 4444: "ORB_S4", 5555: "ORB_S5", 6666: "ORB_S6",
+                7111: "ORB_S1h", 7222: "ORB_S2h", 7333: "ORB_S3h",
+                7444: "ORB_S4h", 7555: "ORB_S5h", 7666: "ORB_S6h",
                 5111: "HEDGE_S1", 5222: "HEDGE_S2", 5333: "HEDGE_S3"}
 # Active v2 stream-source mapping. Update at every Sat reopt:
 #   S1-3 = PREVIOUS-week WFO  |  S4-6 = CURRENT-week WFO
 # Last rotation: 2026-05-09 (S1-3 = MAY2 R1-3 / S4-6 = MAY9 R1-3)
 STREAM_SOURCE = {1111: "MAY2 R1 (prev)", 2222: "MAY2 R2 (prev)", 3333: "MAY2 R3 (prev)",
-                 4444: "MAY9 R1 (curr)", 5555: "MAY9 R2 (curr)", 6666: "MAY9 R3 (curr)"}
+                 4444: "MAY9 R1 (curr)", 5555: "MAY9 R2 (curr)", 6666: "MAY9 R3 (curr)",
+                 7111: "retry S1 tp=1.0", 7222: "retry S2 tp=0.75", 7333: "retry S3 tp=0.75",
+                 7444: "retry S4 tp=1.0", 7555: "retry S5 tp=0.75", 7666: "retry S6 tp=0.75"}
 # XAUUSD.sc reports trade_contract_size=1.0 in symbol_info but realized P&L
 # reconciles only with 100 oz/lot. Verified via order history 2026-05-03.
 CONTRACT_SIZE = 100
@@ -112,9 +116,11 @@ def main() -> int:
         print("=" * 78)
         print(f"  Balance: ${ai.balance:,.2f}   Equity: ${ai.equity:,.2f}   "
               f"Margin: ${ai.margin:,.2f}   Free: ${ai.margin_free:,.2f}")
-        print(f"  v2 stream-source mapping (S1-3=prev week, S4-6=curr week):")
-        for mag in (1111, 2222, 3333, 4444, 5555, 6666):
-            print(f"    {STREAM_NAMES[mag]:<7} ({mag}) -> {STREAM_SOURCE.get(mag, '?')}")
+        print(f"  v2.1_h stream-source mapping (parent S1-6 + hedge S1h-S6h):")
+        for mag in (1111, 2222, 3333, 4444, 5555, 6666,
+                    7111, 7222, 7333, 7444, 7555, 7666):
+            name = STREAM_NAMES.get(mag, f"m{mag}")
+            print(f"    {name:<8} ({mag}) -> {STREAM_SOURCE.get(mag, '?')}")
         print("=" * 78)
 
         def aggregate(window_start, window_end, collect_events: bool):
