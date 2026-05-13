@@ -1,5 +1,9 @@
 ; DT818_pro_v2.1 - 6-stream ORB rank portfolio (no hedge), 3.0% total per setup
-; Generated 2026-05-09
+; Generated 2026-05-09. Range filter disabled 2026-05-13.
+;
+; RANGE FILTER: DISABLED (Min=0, Max=999999) per WFO 2026-05-13 Option A.
+;   See 9pct setfile header for full sim result. At 3pct, expected NP ~1/3 of 9pct
+;   numbers, NP/DD$ ratio stays roughly the same.
 ;
 ; Architecture (weekly Sat reopt):
 ;   S1/S2/S3 (magics 1111/2222/3333): PREVIOUS-week WFO top 3 (MAY2)
@@ -29,8 +33,8 @@ _MaxSpreadPts=50||50||1||50||50||N
 ; ===== ORB shared params =====
 _BrokerGMTOffsetHours=0||0||1||0||0||N  ; DEPRECATED post 2026-05-07 (EA uses TimeGMT)
 _ORB_BufferPts=0||0||1||0||0||N
-_ORB_MinRangePts=200||200||1||200||200||N
-_ORB_MaxRangePts=5000||5000||1||5000||5000||N
+_ORB_MinRangePts=0||0||1||0||0||N             ; range filter DISABLED per WFO 2026-05-13 Option A
+_ORB_MaxRangePts=999999||999999||1||999999||999999||N ; range filter DISABLED per WFO 2026-05-13 Option A
 _ORB_LDN_Enabled=true
 _ORB_LDN_StartHour=4||4||1||4||4||N
 _ORB_NY_Enabled=true

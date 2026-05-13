@@ -1,5 +1,12 @@
 ; DT818_pro_v2.1 - 6-stream ORB rank portfolio (no hedge), 9.0% total per setup
-; Generated 2026-05-09
+; Generated 2026-05-09. Range filter disabled 2026-05-13.
+;
+; RANGE FILTER: DISABLED (Min=0, Max=999999) per WFO 2026-05-13 Option A.
+;   Sim result (77d, $10k, 1.5% per stream):
+;     v2.1 baseline (Min=200, Max=5000):  NP=+$87,318  DD=8.70%  NP/DD$=10.31
+;     NONE (no filter, this setfile):     NP=+$115,401 DD=8.16%  NP/DD$=11.28
+;   Delta: +$28k NP, -0.5pp DD, +0.97 NP/DD$ (= +9.4% NP/DD$ improvement).
+;   Note: P0 FAIL on NONE (slope -57.8%) - watch for decay in live data.
 ;
 ; Architecture (weekly Sat reopt):
 ;   S1/S2/S3 (magics 1111/2222/3333): PREVIOUS-week WFO top 3 (MAY2)
@@ -29,8 +36,8 @@ _MaxSpreadPts=50||50||1||50||50||N
 ; ===== ORB shared params =====
 _BrokerGMTOffsetHours=0||0||1||0||0||N  ; DEPRECATED post 2026-05-07 (EA uses TimeGMT)
 _ORB_BufferPts=0||0||1||0||0||N
-_ORB_MinRangePts=200||200||1||200||200||N
-_ORB_MaxRangePts=5000||5000||1||5000||5000||N
+_ORB_MinRangePts=0||0||1||0||0||N             ; range filter DISABLED per WFO 2026-05-13 Option A
+_ORB_MaxRangePts=999999||999999||1||999999||999999||N ; range filter DISABLED per WFO 2026-05-13 Option A
 _ORB_LDN_Enabled=true
 _ORB_LDN_StartHour=4||4||1||4||4||N
 _ORB_NY_Enabled=true
