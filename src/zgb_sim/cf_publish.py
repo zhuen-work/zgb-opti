@@ -119,6 +119,17 @@ def publish_projection(projection: Mapping[str, Any]) -> bool:
     return _post("/ingest/projection", projection)
 
 
+def publish_alert(severity: str, kind: str, message: str,
+                   context: Mapping[str, Any] | None = None,
+                   ts: str | None = None) -> bool:
+    """Post a trigger alert. severity: info|warn|critical."""
+    return _post("/ingest/alert", {
+        "ts": ts or datetime.now(timezone.utc).isoformat(),
+        "severity": severity, "kind": kind, "message": message,
+        "context": dict(context) if context else None,
+    })
+
+
 def publish_weekly_recap(week_ending: str, days: int, net_pnl: float, balance_end: float,
                           trades: int, wins: int, losses: int,
                           by_stream: Mapping[str, Any]) -> bool:

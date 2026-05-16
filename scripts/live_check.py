@@ -81,8 +81,24 @@ def print_projection_vs_actual(today_np: float, wtd_np: float, current_balance: 
     print()
     if today_np <= daily_red_trip:
         print(f"  !! DAILY outlier: ${today_np:+,.0f} <= trigger ${daily_red_trip:+,.0f} -- investigate today's fills.")
+        try:
+            from zgb_sim.cf_publish import publish_alert
+            publish_alert("critical", "daily_red",
+                f"Daily P&L ${today_np:+,.0f} breached trigger ${daily_red_trip:+,.0f}",
+                context={"today_np": today_np, "trigger": daily_red_trip,
+                         "balance": current_balance, "setfile": proj.get("setfile")})
+        except Exception:
+            pass
     if wtd_np <= week_red_trip:
         print(f"  !! WEEKLY outlier: ${wtd_np:+,.0f} <= trigger ${week_red_trip:+,.0f} -- pause + re-eval setfile.")
+        try:
+            from zgb_sim.cf_publish import publish_alert
+            publish_alert("critical", "weekly_red",
+                f"7d P&L ${wtd_np:+,.0f} breached trigger ${week_red_trip:+,.0f}",
+                context={"wtd_np": wtd_np, "trigger": week_red_trip,
+                         "balance": current_balance, "setfile": proj.get("setfile")})
+        except Exception:
+            pass
     print("=" * 78)
 
 # MT5 Files dir (sandbox accessible to read EAs but useful for our journal too)

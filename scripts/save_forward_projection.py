@@ -117,7 +117,25 @@ def main() -> int:
                     help="Source WFO dir for S1-S3 (avg slope)")
     ap.add_argument("--curr-wfo", default="output/wfo_orb_may16",
                     help="Source WFO dir for S4-S6 (avg slope)")
+    ap.add_argument("--push-existing", action="store_true",
+                    help="Skip the sim. Read existing output/forward_projection.json "
+                         "and push to dt818-console. Useful when MT5 closed (weekends) "
+                         "or to re-publish without recomputing.")
     args = ap.parse_args()
+
+    if args.push_existing:
+        if not PROJECTION_PATH.exists():
+            print(f"[error] No existing projection at {PROJECTION_PATH}. "
+                  "Run without --push-existing to create one.")
+            return 1
+        proj = json.loads(PROJECTION_PATH.read_text())
+        print(f"  Read existing projection from {PROJECTION_PATH}")
+        print(f"  Setfile: {proj.get('setfile')}   "
+              f"Weekly mean: ${proj.get('weekly_live',{}).get('mean_np',0):+,.0f}")
+        from zgb_sim.cf_publish import publish_projection
+        ok = publish_projection(proj)
+        print(f"  {'Published to dt818-console.' if ok else 'PUSH FAILED -- check .env'}")
+        return 0 if ok else 1
 
     setpath = ROOT / args.setfile
     cfg = parse_setfile(setpath)
