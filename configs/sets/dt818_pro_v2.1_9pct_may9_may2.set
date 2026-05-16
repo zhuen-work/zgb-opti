@@ -23,7 +23,7 @@
 ;   S5 rank 2: Range=90/SL=350/RR=4.0/HTP=0.5   P0=FAIL slope=-71%
 ;   S6 rank 3: Range=90/SL=400/RR=4.0/HTP=0.5   P0=FAIL slope=-75%
 ;
-; Spread guard: _MaxSpreadPts=50 (Vantage max observed 32pt)
+; Spread guard: _MaxSpreadPts=60 (Vantage max observed 32pt; bumped 50->60 on 2026-05-15 to match SIM_SPREAD_PTS=60 in WFO friction)
 
 ; ===== Global account =====
 _CapitalProtectionAmount=0.0||0.0||1||0.0||0.0||N
@@ -31,7 +31,7 @@ _RiskPct=1.5||1.5||1||1.5||1.5||N
 _LotMode=1||1||1||1||1||N
 TierBase=2000||2000||1||2000||2000||N
 LotStep=0.01||0.01||1||0.01||0.01||N
-_MaxSpreadPts=50||50||1||50||50||N
+_MaxSpreadPts=60||60||1||60||60||N
 
 ; ===== ORB shared params =====
 _BrokerGMTOffsetHours=0||0||1||0||0||N  ; DEPRECATED post 2026-05-07 (EA uses TimeGMT)

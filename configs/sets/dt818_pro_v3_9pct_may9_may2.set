@@ -1,21 +1,39 @@
-; DT818_pro_v2.1_h - 6-stream ORB rank portfolio + 6 retry-hedge sub-streams
-; Generated 2026-05-13. Use with ea/DT818_pro_v2.1_h.mq5 (v2.1 timezone fixes +
-; retry hedge logic + tp_mult support).
+; DT818_pro_v3 - 6-stream ORB rank portfolio + 6 REVERSE-hedge sub-streams
+; Generated 2026-05-14. Use with ea/DT818_pro_v3.mq5 (reverse-hedge logic:
+; opposite-direction LIMIT at parent entry, mirrored SL/TP).
 ;
-; PARENT total risk: 9.0% (1.5% × 6 streams), same as v2.1 9pct setfile.
+; PARENT total risk: 9.0% (1.5% x 6 streams). Range filter DISABLED per WFO
+; 2026-05-13 Option A (Min=0, Max=999999). Same parent geometry as v2.1 9pct.
 ;   S1-S3 = MAY2 R1-R3 (previous-week WFO), magics 1111/2222/3333
 ;   S4-S6 = MAY9 R1-R3 (current-week WFO),  magics 4444/5555/6666
 ;
-; HEDGE config (from sim_wfo_hedge_retry_global.py WFO 2026-05-13):
+; REVERSE-HEDGE config:
+;   Direction:  OPPOSITE of parent (BUY parent SL -> SELL_LIMIT hedge; vice versa)
+;   Order type: LIMIT (not STOP)
+;   Entry:      Parent's original entry price
+;   SL/TP:      Mirrored across entry (hedge SL on opposite side from parent SL)
 ;   Global expire_minutes = 720 (12h)
 ;   Global F1 filter      = DISABLED (max_seconds_after_entry=0)
-;   Per-stream tp_mult:   S1=1.0, S2=0.75, S3=0.75, S4=1.0, S5=0.75, S6=0.75
-;   Hedge magics: 7111/7222/7333/7444/7555/7666
+;   Per-stream tp_mult:   inherits v2.1_h winner (S1=1.0, S2=0.75, S3=0.75,
+;                                                  S4=1.0, S5=0.75, S6=0.75).
+;                          v3 backfill 2026-05-11..14 used same tp_mult cfg.
+;   Hedge magics: 8111/8222/8333/8444/8555/8666 (v3 reverse).
+;                  7xxx reserved for v2.1_h retry-hedge legacy / log-disambiguation.
 ;
-; Backtest result (77d, $10k, 1.5% per stream):
-;   no-retry:  NP=+$87,318  DD=8.70%  NP/DD$=10.31
-;   +retry:    NP=+$121,714 DD=8.81%  NP/DD$=10.48  (+$34k NP, +0.17 NP/DD$)
-;   Note: 0/7 P0 pass — decay filter rejects all; OOS NPs decay W1→W4
+; Backfill 2026-05-11..14 (scripts/backfill_reverse_hedge.py against actual ticks):
+;   Parent SL losses Mon-Thu: -$60,301
+;   Reverse-hedge $ delta:    +$35,160  (58% recovery)
+;   Per-regime:
+;     NORMAL (Tue): 21/21 TP   +$21,812   (CAVEAT: tick-microstructure dependent)
+;     TIGHT  (Mon+Wed): 19/22 TP, 3 SL  +$13,348
+;     WIDE   (Thu LDN): 0/10 NO_FIRE   $0   (price never retraced to entry)
+;
+; LIVE EXECUTION CAVEAT: Tuesday's 21/21 TP relies on price briefly oscillating
+; back through entry then resuming SL-direction within the 12h expire window.
+; Real broker fills may be worse than the tick-mid sim. Expect 50-70% of
+; modeled recovery to materialize in production = ~$22-25k vs $35k modeled.
+;
+; Spread guard: _MaxSpreadPts=60 (Vantage max observed 32pt; bumped 50->60 on 2026-05-15 to match SIM_SPREAD_PTS=60 in WFO friction)
 
 ; ===== Global account =====
 _CapitalProtectionAmount=0.0||0.0||1||0.0||0.0||N
@@ -28,8 +46,8 @@ _MaxSpreadPts=60||60||1||60||60||N
 ; ===== ORB shared params =====
 _BrokerGMTOffsetHours=0||0||1||0||0||N  ; DEPRECATED post 2026-05-07 (EA uses TimeGMT)
 _ORB_BufferPts=0||0||1||0||0||N
-_ORB_MinRangePts=200||200||1||200||200||N
-_ORB_MaxRangePts=5000||5000||1||5000||5000||N
+_ORB_MinRangePts=0||0||1||0||0||N             ; range filter DISABLED per WFO 2026-05-13 Option A
+_ORB_MaxRangePts=999999||999999||1||999999||999999||N ; range filter DISABLED per WFO 2026-05-13 Option A
 _ORB_LDN_Enabled=true
 _ORB_LDN_StartHour=4||4||1||4||4||N
 _ORB_NY_Enabled=true
@@ -107,10 +125,10 @@ _ORB_S6_PendingExpireMinutes=240||240||1||240||240||N
 _ORB_S6_DailyTargetPct=0.0||0.0||1||0.0||0.0||N
 _ORB_S6_DailyLossPct=0.0||0.0||1||0.0||0.0||N
 
-; ===== HEDGE_S1h -- retry hedge for ORB_S1 (magic 7111) =====
+; ===== HEDGE_S1r -- REVERSE hedge for ORB_S1 (magic 8111) =====
 _HEDGE_S1_Enabled=true
-_HEDGE_S1_Magic=7111||7111||1||7111||7111||N
-_HEDGE_S1_Comment=ORB_S1h
+_HEDGE_S1_Magic=8111||8111||1||8111||8111||N
+_HEDGE_S1_Comment=ORB_S1r
 _HEDGE_S1_ParentMagic=1111||1111||1||1111||1111||N
 _HEDGE_S1_BufferPts=0||0||1||0||0||N
 _HEDGE_S1_FixedSL_Pts=500||500||1||500||500||N
@@ -120,10 +138,10 @@ _HEDGE_S1_RiskPct=1.5||1.5||1||1.5||1.5||N
 _HEDGE_S1_MaxSecondsAfterEntry=0||0||1||0||0||N
 _HEDGE_S1_TPMult=1.0||1.0||1||1.0||1.0||N
 
-; ===== HEDGE_S2h -- retry hedge for ORB_S2 (magic 7222) =====
+; ===== HEDGE_S2r -- REVERSE hedge for ORB_S2 (magic 8222) =====
 _HEDGE_S2_Enabled=true
-_HEDGE_S2_Magic=7222||7222||1||7222||7222||N
-_HEDGE_S2_Comment=ORB_S2h
+_HEDGE_S2_Magic=8222||8222||1||8222||8222||N
+_HEDGE_S2_Comment=ORB_S2r
 _HEDGE_S2_ParentMagic=2222||2222||1||2222||2222||N
 _HEDGE_S2_BufferPts=0||0||1||0||0||N
 _HEDGE_S2_FixedSL_Pts=400||400||1||400||400||N
@@ -133,10 +151,10 @@ _HEDGE_S2_RiskPct=1.5||1.5||1||1.5||1.5||N
 _HEDGE_S2_MaxSecondsAfterEntry=0||0||1||0||0||N
 _HEDGE_S2_TPMult=0.75||0.75||1||0.75||0.75||N
 
-; ===== HEDGE_S3h -- retry hedge for ORB_S3 (magic 7333) =====
+; ===== HEDGE_S3r -- REVERSE hedge for ORB_S3 (magic 8333) =====
 _HEDGE_S3_Enabled=true
-_HEDGE_S3_Magic=7333||7333||1||7333||7333||N
-_HEDGE_S3_Comment=ORB_S3h
+_HEDGE_S3_Magic=8333||8333||1||8333||8333||N
+_HEDGE_S3_Comment=ORB_S3r
 _HEDGE_S3_ParentMagic=3333||3333||1||3333||3333||N
 _HEDGE_S3_BufferPts=0||0||1||0||0||N
 _HEDGE_S3_FixedSL_Pts=350||350||1||350||350||N
@@ -146,10 +164,10 @@ _HEDGE_S3_RiskPct=1.5||1.5||1||1.5||1.5||N
 _HEDGE_S3_MaxSecondsAfterEntry=0||0||1||0||0||N
 _HEDGE_S3_TPMult=0.75||0.75||1||0.75||0.75||N
 
-; ===== HEDGE_S4h -- retry hedge for ORB_S4 (magic 7444) =====
+; ===== HEDGE_S4r -- REVERSE hedge for ORB_S4 (magic 8444) =====
 _HEDGE_S4_Enabled=true
-_HEDGE_S4_Magic=7444||7444||1||7444||7444||N
-_HEDGE_S4_Comment=ORB_S4h
+_HEDGE_S4_Magic=8444||8444||1||8444||8444||N
+_HEDGE_S4_Comment=ORB_S4r
 _HEDGE_S4_ParentMagic=4444||4444||1||4444||4444||N
 _HEDGE_S4_BufferPts=0||0||1||0||0||N
 _HEDGE_S4_FixedSL_Pts=650||650||1||650||650||N
@@ -159,10 +177,10 @@ _HEDGE_S4_RiskPct=1.5||1.5||1||1.5||1.5||N
 _HEDGE_S4_MaxSecondsAfterEntry=0||0||1||0||0||N
 _HEDGE_S4_TPMult=1.0||1.0||1||1.0||1.0||N
 
-; ===== HEDGE_S5h -- retry hedge for ORB_S5 (magic 7555) =====
+; ===== HEDGE_S5r -- REVERSE hedge for ORB_S5 (magic 8555) =====
 _HEDGE_S5_Enabled=true
-_HEDGE_S5_Magic=7555||7555||1||7555||7555||N
-_HEDGE_S5_Comment=ORB_S5h
+_HEDGE_S5_Magic=8555||8555||1||8555||8555||N
+_HEDGE_S5_Comment=ORB_S5r
 _HEDGE_S5_ParentMagic=5555||5555||1||5555||5555||N
 _HEDGE_S5_BufferPts=0||0||1||0||0||N
 _HEDGE_S5_FixedSL_Pts=350||350||1||350||350||N
@@ -172,10 +190,10 @@ _HEDGE_S5_RiskPct=1.5||1.5||1||1.5||1.5||N
 _HEDGE_S5_MaxSecondsAfterEntry=0||0||1||0||0||N
 _HEDGE_S5_TPMult=0.75||0.75||1||0.75||0.75||N
 
-; ===== HEDGE_S6h -- retry hedge for ORB_S6 (magic 7666) =====
+; ===== HEDGE_S6r -- REVERSE hedge for ORB_S6 (magic 8666) =====
 _HEDGE_S6_Enabled=true
-_HEDGE_S6_Magic=7666||7666||1||7666||7666||N
-_HEDGE_S6_Comment=ORB_S6h
+_HEDGE_S6_Magic=8666||8666||1||8666||8666||N
+_HEDGE_S6_Comment=ORB_S6r
 _HEDGE_S6_ParentMagic=6666||6666||1||6666||6666||N
 _HEDGE_S6_BufferPts=0||0||1||0||0||N
 _HEDGE_S6_FixedSL_Pts=400||400||1||400||400||N

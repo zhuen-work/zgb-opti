@@ -28,7 +28,7 @@ _RiskPct=1.0||1.0||1||1.0||1.0||N
 _LotMode=1||1||1||1||1||N
 TierBase=2000||2000||1||2000||2000||N
 LotStep=0.01||0.01||1||0.01||0.01||N
-_MaxSpreadPts=50||50||1||50||50||N
+_MaxSpreadPts=60||60||1||60||60||N
 
 ; ===== ORB shared params =====
 _BrokerGMTOffsetHours=0||0||1||0||0||N  ; DEPRECATED post 2026-05-07 (EA uses TimeGMT)

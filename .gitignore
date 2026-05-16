@@ -30,6 +30,9 @@ dist/
 build/
 *.egg-info/
 
+# Runtime logs (WFO output, monitor traces)
+logs/
+
 # Local research artifacts
 data/
 output/
