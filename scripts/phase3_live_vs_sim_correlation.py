@@ -73,9 +73,17 @@ def make_cfg(base_cfg, ldn_hour: int, ny_hour: int, risk: float, comment: str) -
 
 
 def pull_live_daily_pnl():
+    from zgb_sim.mt5_accounts import get_broker_offset
     spec = init_account("live")
     try:
-        deals = mt5.history_deals_get(START, END) or ()
+        # BROKER-TZ FIX: shift bounds + filter strict.
+        broker_off = get_broker_offset(spec.symbol)
+        mt5_start = START + broker_off
+        mt5_end = END + broker_off
+        s_epoch = int(mt5_start.timestamp())
+        e_epoch = int(mt5_end.timestamp())
+        raw = mt5.history_deals_get(mt5_start, mt5_end) or ()
+        deals = [d for d in raw if s_epoch <= d.time <= e_epoch]
         by_day = defaultdict(float)
         for d in deals:
             if d.magic not in V2_MAGICS:

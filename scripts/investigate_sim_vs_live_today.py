@@ -17,11 +17,13 @@ from sim_orb_oos_today import (PREV_WFO_DIR, CURR_WFO_DIR, SPREAD_LIVE, DEPOSIT,
 from zgb_sim.wfo_helpers import WINDOWS_MAY2, WINDOWS_MAY9, rank_with_p0
 from zgb_sim.scalper_v1 import SymbolMeta
 from zgb_sim.orb_fast import simulate_fast as orb_simulate
-from zgb_sim.mt5_accounts import init_account
+from zgb_sim.mt5_accounts import init_account, get_broker_offset
 import pandas as pd
 
 end = datetime.now(timezone.utc)
 start = datetime(end.year, end.month, end.day, tzinfo=timezone.utc)
+# end_b is what we pass to MT5 (+broker_offset to be DST-safe).
+# Defer broker_off computation to after init_account.
 
 MAGIC_TO_LABEL = {1111: "S1", 2222: "S2", 3333: "S3", 4444: "S4", 5555: "S5", 6666: "S6"}
 LABEL_TO_MAGIC = {v: k for k, v in MAGIC_TO_LABEL.items()}
@@ -51,7 +53,14 @@ def pull_live_deals():
     from zgb_sim.tick_loader import kill_mt5_terminal
     spec = init_account("live")
     try:
-        deals = mt5.history_deals_get(start, end) or ()
+        # BROKER-TZ FIX: shift bounds + strict-filter by broker epoch.
+        broker_off = get_broker_offset(spec.symbol)
+        mt5_start = start + broker_off
+        mt5_end = end + broker_off
+        s_epoch = int(mt5_start.timestamp())
+        e_epoch = int(mt5_end.timestamp())
+        raw = mt5.history_deals_get(mt5_start, mt5_end) or ()
+        deals = [d for d in raw if s_epoch <= d.time <= e_epoch]
         by_mag = defaultdict(list)
         for d in deals:
             if d.magic not in MAGIC_TO_LABEL:

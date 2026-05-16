@@ -50,12 +50,22 @@ N_WORKERS = 6
 SIGNAL_TF = "M5"
 PENDING_EXPIRE_MIN = 240  # match live DT818_pro setfile
 
-from zgb_sim.wfo_helpers import (WINDOWS_MAY9 as WINDOWS, rank_with_p0,
+from zgb_sim.wfo_helpers import (WINDOWS_MAY9, WINDOWS_MAY16, rank_with_p0,
                                   print_phase_d_with_p0, select_winner_with_p0,
                                   check_winner_boundaries, print_boundary_check)
 
-PREWARM_START = date(2026, 2, 19)  # MAY9 W1 IS starts Feb 21, give 2-day pad
-PREWARM_END   = date(2026, 5,  9)  # MAY9 W4 OOS ends May 9 (covers May 8 close)
+# Default WFO window set. Override via env: ZGB_WFO_WINDOWS={may9|may16}.
+# May16 windows are 1 week rolled forward from MAY9 (last OOS = 2026-05-09 -> 2026-05-16).
+import os as _os
+_WFO_WIN_TAG = _os.environ.get("ZGB_WFO_WINDOWS", "may9").lower()
+if _WFO_WIN_TAG == "may16":
+    WINDOWS = WINDOWS_MAY16
+    PREWARM_START = date(2026, 2, 26)   # MAY16 W1 IS starts Feb 28, 2-day pad
+    PREWARM_END   = date(2026, 5, 16)   # MAY16 W4 OOS ends May 16
+else:
+    WINDOWS = WINDOWS_MAY9
+    PREWARM_START = date(2026, 2, 19)   # MAY9 W1 IS starts Feb 21, 2-day pad
+    PREWARM_END   = date(2026, 5,  9)   # MAY9 W4 OOS ends May 9
 
 
 def session_flags(session: str):
@@ -63,7 +73,7 @@ def session_flags(session: str):
     return (session in ("ldn", "both"), session in ("ny", "both"))
 
 
-DATE_TAG = "may9_realutc"  # bumped from may2 for the 2026-05-09 reopt
+DATE_TAG = f"{_WFO_WIN_TAG}_realutc"  # may9 or may16 depending on ZGB_WFO_WINDOWS
 
 def out_dir_for(session: str) -> Path:
     if session == "both":

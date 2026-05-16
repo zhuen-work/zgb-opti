@@ -35,6 +35,15 @@ WINDOWS_MAY9 = [
     ("W4", date(2026, 4,  4), date(2026, 5,  2), date(2026, 5,  2), date(2026, 5,  9)),
 ]
 
+# May 16 reopt — 1 week rolled forward from MAY9. Captures May 11-15 trading week
+# (filter-disabled day 1+ plus the LDN cluster days). For Sat 2026-05-16 reopt.
+WINDOWS_MAY16 = [
+    ("W1", date(2026, 2, 28), date(2026, 3, 28), date(2026, 3, 28), date(2026, 4, 11)),
+    ("W2", date(2026, 3, 14), date(2026, 4, 11), date(2026, 4, 11), date(2026, 4, 25)),
+    ("W3", date(2026, 3, 28), date(2026, 4, 25), date(2026, 4, 25), date(2026, 5,  9)),
+    ("W4", date(2026, 4, 11), date(2026, 5,  9), date(2026, 5,  9), date(2026, 5, 16)),
+]
+
 
 def to_utc(d):
     return datetime(d.year, d.month, d.day, tzinfo=timezone.utc)
@@ -51,6 +60,118 @@ def compute_oos_decay_slope(oos_nps: list[float]) -> float:
     last = oos_nps[-1]
     denom = max(abs(first), 1.0)
     return (last - first) / denom
+
+
+def compute_walk_forward_efficiency(is_nps: list[float], oos_nps: list[float]) -> float:
+    """Walk-forward efficiency = sum(OOS_NP) / sum(IS_NP).
+
+    Measures generalization: how much of in-sample edge survives out-of-sample.
+    Values close to 1.0 mean clean generalization. Below 0.5 = overfit. Above
+    1.2 = lucky OOS or IS-conservative grid. Standard WF-analysis metric.
+
+    Defensive: if sum(IS_NP) <= 0, returns 0.0 (the candidate was unprofitable
+    even on its tuning data, so WFE is undefined / treat as worst).
+    """
+    is_sum = sum(is_nps)
+    oos_sum = sum(oos_nps)
+    if is_sum <= 0:
+        return 0.0
+    return oos_sum / is_sum
+
+
+def compute_proportion_profitable(oos_nps: list[float]) -> float:
+    """Fraction of OOS windows with positive NP.
+
+    Binary consistency metric — robust to magnitude. A candidate with NPs
+    [+100, +50, +200, +75] scores 1.0 (4/4 profitable); one with
+    [+1000, -300, +800, -100] scores 0.5 (2/4) despite higher total NP.
+    """
+    if not oos_nps:
+        return 0.0
+    return sum(1 for n in oos_nps if n > 0) / len(oos_nps)
+
+
+def compute_per_window_npdd_median(oos_nps: list[float], oos_dds: list[float]) -> float:
+    """Median of per-window NP/DD$ ratios.
+
+    Risk-adjusted return per window, taken as median (robust to outlier weeks).
+    DD floor of 0.5% to avoid division blowups. Useful when total NP/DD$ is
+    dominated by one big week — median tells you the "typical" week's edge.
+    """
+    if not oos_nps or len(oos_nps) != len(oos_dds):
+        return 0.0
+    ratios = [np_ / max(dd, 0.5) for np_, dd in zip(oos_nps, oos_dds)]
+    ratios.sort()
+    n = len(ratios)
+    if n % 2 == 1:
+        return float(ratios[n // 2])
+    return float((ratios[n // 2 - 1] + ratios[n // 2]) / 2)
+
+
+def compute_recency_weighted_np(oos_nps: list[float]) -> float:
+    """NP weighted toward most-recent window.
+
+    Linear ramp: W_i weight = (i+1) / sum(1..n). For 4 windows, weights
+    are 0.1, 0.2, 0.3, 0.4 (W4 gets 40% of the weight, W1 gets 10%).
+    Captures "what's working now" without slope's overreaction to direction.
+    """
+    if not oos_nps:
+        return 0.0
+    n = len(oos_nps)
+    denom = n * (n + 1) / 2
+    return sum((i + 1) * v for i, v in enumerate(oos_nps)) / denom
+
+
+def compute_stress_regime_np(oos_nps: list[float], oos_dds: list[float],
+                                dd_threshold: float = 10.0) -> float:
+    """NP sum only across stress-regime windows (DD% >= threshold).
+
+    Filters per-window NP to only the higher-DD weeks (typically the
+    cluster-stop / fast-move regimes). A candidate with high stress-NP
+    is robust on tough weeks; one whose NP comes only from low-DD weeks
+    is regime-fragile.
+
+    Returns sum across qualifying windows, or 0.0 if no windows qualify.
+    """
+    if not oos_nps or len(oos_nps) != len(oos_dds):
+        return 0.0
+    return sum(np_ for np_, dd in zip(oos_nps, oos_dds) if dd >= dd_threshold)
+
+
+def compute_min_pf(oos_pfs: list[float]) -> float:
+    """Minimum profit factor across OOS windows — robustness floor."""
+    if not oos_pfs:
+        return 0.0
+    return min(oos_pfs)
+
+
+def compute_pf_stability(oos_pfs: list[float]) -> float:
+    """Coefficient of variation of PF across windows (lower = more stable).
+
+    Returns std(PF) / mean(PF). NaN-safe (returns 0.0 if mean is 0).
+    """
+    if not oos_pfs:
+        return 0.0
+    mean = sum(oos_pfs) / len(oos_pfs)
+    if mean <= 0:
+        return 0.0
+    var = sum((p - mean) ** 2 for p in oos_pfs) / len(oos_pfs)
+    return (var ** 0.5) / mean
+
+
+def compute_np_per_trade(oos_nps: list[float], oos_trades: list[int]) -> float:
+    """Average NP per trade across all OOS windows (trade-count-normalized).
+
+    Strips out trade-count effects — a candidate with 200 trades and $10k
+    NP scores the same as one with 100 trades and $5k NP. Useful for
+    comparing configs with different range/SL setups that produce
+    different trade frequencies.
+    """
+    total_np = sum(oos_nps)
+    total_trades = sum(oos_trades)
+    if total_trades == 0:
+        return 0.0
+    return total_np / total_trades
 
 
 def compute_is_weekly_min(stream_simulate_fn, ticks, signal_bars, m1_bars, cfg, meta,

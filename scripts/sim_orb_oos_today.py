@@ -62,15 +62,34 @@ def fetch_window(symbol: str | None, start: datetime, end: datetime, spread_pts:
     account: "sim" (XAUUSD on 18912087) or "live" (XAUUSD.sc on 23836999).
     Use account="live" to match the symbol the EA actually trades on — fixes the
     sim-vs-live direction divergence on range-break days.
+
+    BROKER-TZ FIX: bake the auto-detected broker offset into the bounds passed
+    to MT5. MT5 reads datetime args as broker wall-clock; without the shift,
+    ~3h of recent data is silently truncated. See
+    feedback_no_unverified_account_claims.md (2026-05-15 incident).
     """
     import MetaTrader5 as mt5
     import numpy as np
-    from zgb_sim.mt5_accounts import init_account
+    from zgb_sim.mt5_accounts import init_account, get_broker_offset
     spec = init_account(account)
     try:
         symbol = symbol or spec.symbol
+        # Auto-detect offset; shift end forward so MT5's broker-time read covers
+        # all current data. Shift start by same offset only if it's a recent
+        # real-UTC moment; for fixed historical bounds (e.g. midnight) it's
+        # already broker-aligned and the shift would skip the first 3h.
+        # Heuristic: if start is within the last 2 days, treat it as a recent
+        # real-UTC moment and shift it. Otherwise leave it.
+        broker_off = get_broker_offset(symbol)
+        now_utc = datetime.now(timezone.utc)
+        days_ago = (now_utc - start).days
+        if days_ago < 2:
+            mt5_start = start + broker_off
+        else:
+            mt5_start = start
+        mt5_end = end + broker_off
         # ticks
-        arr = mt5.copy_ticks_range(symbol, start, end, mt5.COPY_TICKS_ALL)
+        arr = mt5.copy_ticks_range(symbol, mt5_start, mt5_end, mt5.COPY_TICKS_ALL)
         if arr is None or len(arr) == 0:
             raise RuntimeError(f"No ticks for {symbol}: {mt5.last_error()}")
         ticks = pd.DataFrame(arr)
@@ -85,12 +104,13 @@ def fetch_window(symbol: str | None, start: datetime, end: datetime, spread_pts:
             ticks["bid"] = mid - half
             ticks["ask"] = mid + half
         # bars: prime via copy_rates_from_pos (MT5 needs paging for short ranges),
-        # then pull the requested window with copy_rates_range
+        # then pull the requested window with copy_rates_range. Use the same
+        # broker-shifted bounds as ticks above for consistency.
         pad = timedelta(days=5)
         out = {}
         for tf_name, tf_const in [("M1", mt5.TIMEFRAME_M1), ("M5", mt5.TIMEFRAME_M5)]:
             _ = mt5.copy_rates_from_pos(symbol, tf_const, 0, 5000)
-            barr = mt5.copy_rates_range(symbol, tf_const, start - pad, end)
+            barr = mt5.copy_rates_range(symbol, tf_const, mt5_start - pad, mt5_end)
             if barr is None or len(barr) == 0:
                 raise RuntimeError(f"No {tf_name} bars for {symbol}: {mt5.last_error()}")
             df = pd.DataFrame(barr)
@@ -180,6 +200,8 @@ def main() -> int:
                          "(default, matches existing parquet cache). 'live' = 23836999 / XAUUSD.sc "
                          "(matches the symbol the EA actually trades on — fixes direction divergence).")
     args = ap.parse_args()
+    # `end` is the requested window upper bound in real UTC. fetch_window()
+    # now handles the broker-tz shift internally; just pass real UTC.
     end = datetime.now(timezone.utc)
     days = (end - OOS_START).days
 
