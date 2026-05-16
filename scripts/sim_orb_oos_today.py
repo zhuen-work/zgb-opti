@@ -289,6 +289,40 @@ def main() -> int:
             row = by_day[d]
             ps = " ".join(f"{s}:{n}t/${pnl:+,.0f}" for s, (n, pnl) in sorted(row["per_s"].items()))
             print(f"  {str(d):<12} {d.strftime('%a'):<4} {row['n']:>6} ${row['pnl']:>+8,.0f}  {ps}")
+
+        # Push today's friction to dt818-console.
+        # Today sim NP = sum of trades in by_day matching today's date (live broker
+        # date). Today live NP = pulled from D1 via /api/today.
+        try:
+            import json as _json
+            import urllib.request as _u
+            import os as _os
+            today_d = datetime.now(timezone.utc).date()
+            sim_today = sum(row["pnl"] for d, row in by_day.items() if d == today_d)
+            # Pull today's live NP from the dashboard API.
+            api = _os.environ.get("CONSOLE_API_BASE", "")
+            tok = _os.environ.get("CONSOLE_READ_TOKEN", "") or _os.environ.get("CONSOLE_INGEST_TOKEN", "")
+            live_today = 0.0
+            if api and tok:
+                req = _u.Request(api.rstrip("/") + "/api/today",
+                                  headers={"Authorization": f"Bearer {tok}",
+                                            "User-Agent": "sim-oos-friction/1.0"})
+                with _u.urlopen(req, timeout=10) as resp:
+                    body = _json.loads(resp.read().decode())
+                today_deals = body.get("today_deals") or []
+                prod_magics = {1111, 2222, 3333, 4444, 5555, 6666}
+                live_today = sum(float(d.get("profit", 0))
+                                  for d in today_deals if int(d.get("magic", 0)) in prod_magics)
+            from zgb_sim.cf_publish import publish_friction
+            ok = publish_friction(
+                date=today_d.isoformat(), sim_np=float(sim_today), live_np=float(live_today),
+                spread_pts=int(SPREAD_LIVE), total_risk=9.0,
+                notes="sim_orb_oos_today vs live deals (prod magics)",
+            )
+            print(f"\n  [cf_publish] friction push: {'OK' if ok else 'FAIL'} "
+                  f"sim=${sim_today:+,.0f} live=${live_today:+,.0f}")
+        except Exception as e:
+            print(f"\n  [cf_publish] friction skipped: {type(e).__name__}: {e}")
     finally:
         kill_mt5_terminal()
     return 0

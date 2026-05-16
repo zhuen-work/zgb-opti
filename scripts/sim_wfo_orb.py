@@ -434,6 +434,25 @@ def main():
         print(f"  Winner persisted: {winner_path}")
         sanity_et(winner, meta, session_label=rank_label)
         print("\n=== Done ===")
+
+        # Auto-refresh dashboard projection (View C + Weekly Projection cards)
+        # so the dashboard always reflects the latest WFO winner without a
+        # manual save_forward_projection.py run. Fails-open: dashboard push
+        # errors don't fail the WFO.
+        try:
+            print("\n=== Refreshing dashboard projection ===")
+            import subprocess as _sp
+            r = _sp.run(
+                [sys.executable, "-u", str(ROOT / "scripts" / "save_forward_projection.py")],
+                capture_output=True, text=True, timeout=600,
+            )
+            tail = (r.stdout or "").splitlines()[-3:]
+            for line in tail:
+                print(f"  {line}")
+            if r.returncode != 0:
+                print(f"  [warn] save_forward_projection exit {r.returncode}: {r.stderr[:200] if r.stderr else ''}")
+        except Exception as e:
+            print(f"  [warn] dashboard projection refresh skipped: {type(e).__name__}: {e}")
     finally:
         kill_mt5_terminal()
 

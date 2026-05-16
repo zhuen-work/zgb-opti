@@ -119,6 +119,20 @@ def publish_projection(projection: Mapping[str, Any]) -> bool:
     return _post("/ingest/projection", projection)
 
 
+def publish_friction(date: str, sim_np: float, live_np: float,
+                      spread_pts: int | None = None, total_risk: float | None = None,
+                      notes: str | None = None) -> bool:
+    """Post today's sim-vs-live friction row.
+    friction_pct = (sim - live) / max(abs(live), 1) * 100 (positive = sim optimistic)."""
+    denom = max(abs(live_np), 1.0)
+    friction_pct = (sim_np - live_np) / denom * 100.0
+    return _post("/ingest/friction", {
+        "date": date, "sim_np": sim_np, "live_np": live_np,
+        "friction_pct": friction_pct, "spread_pts": spread_pts,
+        "total_risk": total_risk, "notes": notes,
+    })
+
+
 def publish_alert(severity: str, kind: str, message: str,
                    context: Mapping[str, Any] | None = None,
                    ts: str | None = None) -> bool:
