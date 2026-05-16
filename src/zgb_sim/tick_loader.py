@@ -12,11 +12,14 @@ import pandas as pd
 # Standard sim spread (pts) — applied to loaded ticks by default.
 # Real Vantage XAUUSD avg is ~25 pts; 70 is conservative for live execution variance.
 # Pass spread_pts=0 to load_ticks for raw real-tick spreads.
-# Default sim spread: 55pt = ~35pt assumed worst spread + 2x10pt slippage proxy.
+# Default sim spread: 60pt = ~35pt assumed worst spread + 25pt slippage proxy.
+#   Bumped 55 -> 60 on 2026-05-15 after May 14-15 cluster-stop friction
+#   (~20-29% live underperformance vs sim @ 55pt). 5pt bump = ~$0.50 extra
+#   slippage-equivalent per trade, conservative buffer for cluster-day reality.
 # Empirical Vantage XAUUSD max-observed = 32pt; this is conservative friction
 # tuning so WFO winners are robust to real broker friction. Override per-call
 # with spread_pts=23 for live-match calibration, =0 to use real recorded spreads.
-SIM_SPREAD_PTS = 55
+SIM_SPREAD_PTS = 60
 XAUUSD_POINT = 0.01
 
 # Per-symbol point + default sim-spread (pts) used when caller passes no override.
@@ -27,8 +30,8 @@ SYMBOL_POINT = {
     "NAS100.r": 0.01,   # Vantage mini index CFD
 }
 SYMBOL_DEFAULT_SPREAD_PTS = {
-    "XAUUSD": 55,        # gold default (matches SIM_SPREAD_PTS)
-    "XAUUSD.sc": 55,
+    "XAUUSD": 60,        # gold default (matches SIM_SPREAD_PTS, bumped 55->60 2026-05-15)
+    "XAUUSD.sc": 60,
     "NAS100.r": 250,     # measured median 180, p99 220 (2026-04 -> 2026-05)
 }
 

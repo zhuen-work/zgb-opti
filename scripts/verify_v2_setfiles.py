@@ -1,6 +1,7 @@
 """Verify all 3 v2 setfiles match the intended convention.
 
-S1-3 = PREVIOUS week (MAY2 R1-3), S4-6 = CURRENT week (MAY9 R1-3).
+S1-3 = PREVIOUS week (MAY9 R1-3), S4-6 = CURRENT week (MAY16 R2/R3/R4).
+MAY16 R1 + R5 skipped per dup-skip policy (collided with MAY9 R2 + R1).
 _RiskPct: 3pct=0.5, 6pct=1.0, 9pct=1.5.
 """
 from __future__ import annotations
@@ -12,22 +13,20 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 EXPECTED = {
-    "S1": {"src": "MAY2 R1", "RangeMinutes": 90, "FixedSL_Pts": 500, "RR_Ratio": 4.0, "HalfTP_Ratio": 0.25, "Magic": 1111},
-    "S2": {"src": "MAY2 R2", "RangeMinutes": 90, "FixedSL_Pts": 400, "RR_Ratio": 4.0, "HalfTP_Ratio": 0.0,  "Magic": 2222},
-    "S3": {"src": "MAY2 R3", "RangeMinutes": 90, "FixedSL_Pts": 350, "RR_Ratio": 4.0, "HalfTP_Ratio": 0.5,  "Magic": 3333},
-    "S4": {"src": "MAY9 R1", "RangeMinutes": 90, "FixedSL_Pts": 650, "RR_Ratio": 4.0, "HalfTP_Ratio": 0.25, "Magic": 4444},
-    "S5": {"src": "MAY9 R2", "RangeMinutes": 90, "FixedSL_Pts": 350, "RR_Ratio": 4.0, "HalfTP_Ratio": 0.5,  "Magic": 5555},
-    "S6": {"src": "MAY9 R3", "RangeMinutes": 90, "FixedSL_Pts": 400, "RR_Ratio": 4.0, "HalfTP_Ratio": 0.5,  "Magic": 6666},
+    "S1": {"src": "MAY9 R1",  "RangeMinutes": 90, "FixedSL_Pts": 700, "RR_Ratio": 2.5, "HalfTP_Ratio": 0.4, "Magic": 1111},
+    "S2": {"src": "MAY9 R2",  "RangeMinutes": 90, "FixedSL_Pts": 550, "RR_Ratio": 3.5, "HalfTP_Ratio": 0.2, "Magic": 2222},
+    "S3": {"src": "MAY9 R3",  "RangeMinutes": 90, "FixedSL_Pts": 400, "RR_Ratio": 4.0, "HalfTP_Ratio": 0.6, "Magic": 3333},
+    "S4": {"src": "MAY16 R2", "RangeMinutes": 90, "FixedSL_Pts": 550, "RR_Ratio": 4.0, "HalfTP_Ratio": 0.4, "Magic": 4444},
+    "S5": {"src": "MAY16 R3", "RangeMinutes": 90, "FixedSL_Pts": 550, "RR_Ratio": 3.5, "HalfTP_Ratio": 0.4, "Magic": 5555},
+    "S6": {"src": "MAY16 R4", "RangeMinutes": 90, "FixedSL_Pts": 550, "RR_Ratio": 3.0, "HalfTP_Ratio": 0.4, "Magic": 6666},
 }
 RISK_BY_FILE = {
-    "dt818_pro_v2.1_3pct_may9_may2.set": 0.5,
-    "dt818_pro_v2.1_6pct_may9_may2.set": 1.0,
-    "dt818_pro_v2.1_9pct_may9_may2.set": 1.5,
+    "dt818_pro_v2.1_6pct_may16_may9.set": 1.0,
+    "dt818_pro_v2.1_9pct_may16_may9.set": 1.5,
 }
 TOTAL_BY_FILE = {
-    "dt818_pro_v2.1_3pct_may9_may2.set": 3.0,
-    "dt818_pro_v2.1_6pct_may9_may2.set": 6.0,
-    "dt818_pro_v2.1_9pct_may9_may2.set": 9.0,
+    "dt818_pro_v2.1_6pct_may16_may9.set": 6.0,
+    "dt818_pro_v2.1_9pct_may16_may9.set": 9.0,
 }
 
 
@@ -90,7 +89,7 @@ def verify_setfile(path: Path) -> tuple[bool, list[str]]:
 def main() -> int:
     print("=" * 80)
     print("  Verify v2 setfiles match weekly-reopt convention")
-    print("  S1-3 = PREVIOUS week (MAY2 R1-3) | S4-6 = CURRENT week (MAY9 R1-3)")
+    print("  S1-3 = PREVIOUS week (MAY9 R1-3) | S4-6 = CURRENT week (MAY16 R2/R3/R4, dup-skipped)")
     print("=" * 80)
     all_ok = True
     for fname, total in TOTAL_BY_FILE.items():

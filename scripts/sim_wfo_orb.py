@@ -14,14 +14,18 @@ caps DISABLED (matches live which runs uncapped). Phase 2 (separate script) tune
 caps against Phase 1 winner. Caps and entry mechanics are weakly coupled, so this
 saves ~9x compute vs sweeping the cartesian product.
 
-Phase 1 grid: 504 combos × 4 windows = 2,016 sims at 55pt friction:
-  range_minutes:    45, 60, 90, 105, 120, 150               (6)
+Phase 1 grid: 1,125 combos × 4 windows = 4,500 sims at 60pt friction, 6% risk:
+  range_minutes:    60, 90, 120                              (3, 30-step from 60)
   buffer_pts:       0                                        (1, fixed)
-  fixed_sl_pts:     350, 400, 500, 650, 800, 950, 1100       (7, added 400)
-  rr_ratio:         2.0, 3.0, 4.0                            (3)
-  half_tp_ratio:    0.0, 0.25, 0.5, 0.75                     (4)
-  daily_target_pct: 0 (disabled — Phase 2 tunes separately)  (1)
-  daily_loss_pct:   0 (disabled — Phase 2 tunes separately)  (1)
+  min_range_pts:    0                                        (range filter DISABLED to match live)
+  max_range_pts:    999999                                   (range filter DISABLED to match live)
+  fixed_sl_pts:     400, 550, 700, 850, 1000                 (5, 150-step from 400)
+  rr_ratio:         2.0, 2.5, 3.0, 3.5, 4.0                  (5, 0.5-step from 2.0)
+  half_tp_ratio:    0.0, 0.2, 0.4, 0.6, 0.8                  (5, 0.2-step from 0.0)
+  pending_expire_minutes: 120, 240, 360                      (3, 120-step from 120)
+  daily_target_pct: 0 (Phase 2 cap sweep DISABLED 2026-05-15)
+  daily_loss_pct:   0 (Phase 2 cap sweep DISABLED 2026-05-15)
+  risk_pct:         6.0 (bumped 3->6 on 2026-05-15)
 """
 from __future__ import annotations
 
@@ -44,11 +48,11 @@ from zgb_sim.sweep_orb import run_sweep
 
 
 SYMBOL = "XAUUSD"
-RISK_PCT = 3.0
+RISK_PCT = 6.0   # bumped 3->6 on 2026-05-15 per user; matches sweep risk closer to total live risk envelope
 DEPOSIT = 10_000.0
 N_WORKERS = 6
 SIGNAL_TF = "M5"
-PENDING_EXPIRE_MIN = 240  # match live DT818_pro setfile
+PENDING_EXPIRE_MIN = 240  # legacy default; sweep dim added 2026-05-15 (see grid below)
 
 # !!! BROKER-TIME GOTCHA — read reference_vantage_broker_time.md !!!
 # MT5 (Vantage) returns timestamps in BROKER LOCAL TIME (currently UTC+3, EEST/DST).
@@ -62,11 +66,20 @@ PENDING_EXPIRE_MIN = 240  # match live DT818_pro setfile
 # ny_start_hour=16 (broker labels for real UTC 07/13). See sim_wfo_orb_realutc.py
 # for that variant. Verified 2026-05-11.
 
-from zgb_sim.wfo_helpers import (WINDOWS_MAY9 as WINDOWS, rank_with_p0,
+from zgb_sim.wfo_helpers import (WINDOWS_MAY9, WINDOWS_MAY16, rank_with_p0,
                                   print_phase_d_with_p0, select_winner_with_p0,
                                   check_winner_boundaries, print_boundary_check)
 
-PREWARM_START = date(2026, 2, 19)  # MAY9 W1 IS starts Feb 21, give 2-day pad
+# Default WFO window set. Override via env: ZGB_WFO_WINDOWS={may9|may16}.
+# MAY16 windows are 1 week rolled forward from MAY9 (last OOS = 2026-05-09 -> 2026-05-16).
+import os as _os
+_WFO_WIN_TAG = _os.environ.get("ZGB_WFO_WINDOWS", "may9").lower()
+if _WFO_WIN_TAG == "may16":
+    WINDOWS = WINDOWS_MAY16
+    PREWARM_START = date(2026, 2, 26)
+else:
+    WINDOWS = WINDOWS_MAY9
+    PREWARM_START = date(2026, 2, 19)  # MAY9 W1 IS starts Feb 21, give 2-day pad
 PREWARM_END   = date(2026, 5,  9)  # MAY9 W4 OOS ends May 9 (covers May 8 close)
 
 
@@ -75,7 +88,7 @@ def session_flags(session: str):
     return (session in ("ldn", "both"), session in ("ny", "both"))
 
 
-DATE_TAG = "may9"  # bumped from may2 for the 2026-05-09 reopt
+DATE_TAG = _WFO_WIN_TAG  # may9 or may16 depending on ZGB_WFO_WINDOWS
 
 def out_dir_for(session: str) -> Path:
     if session == "both":
@@ -98,26 +111,27 @@ def build_entry_grid(session: str, tiny=False) -> list[ORBConfig]:
             comment="ORB",
         )]
     grid = []
-    for range_min in (45, 60, 90, 105, 120, 150):              # 6
-        for fixed_sl in (350, 400, 500, 650, 800, 950, 1100):  # 7
-            for rr in (2.0, 3.0, 4.0):                         # 3
-                for htp in (0.0, 0.25, 0.5, 0.75):             # 4
-                    grid.append(ORBConfig(
-                        risk_pct=RISK_PCT,
-                        range_minutes=range_min,
-                        buffer_pts=0,
-                        min_range_pts=200,
-                        max_range_pts=5000,
-                        fixed_sl_pts=fixed_sl,
-                        rr_ratio=rr,
-                        half_tp_ratio=htp,
-                        pending_expire_minutes=PENDING_EXPIRE_MIN,
-                        daily_target_pct=0.0,
-                        daily_loss_pct=0.0,
-                        ldn_enabled=ldn_on, ldn_start_hour=7,
-                        ny_enabled=ny_on, ny_start_hour=13,
-                        comment="ORB",
-                    ))
+    for range_min in (60, 90, 120):                            # 3 (30-step 60-120, per user 2026-05-16)
+        for fixed_sl in (400, 550, 700, 850, 1000):            # 5 (150-step 400-1000, per user 2026-05-16)
+            for rr in (2.0, 2.5, 3.0, 3.5, 4.0):               # 5 (0.5-step 2.0-4.0, per user 2026-05-16)
+                for htp in (0.0, 0.2, 0.4, 0.6, 0.8):          # 5 (0.2-step 0.0-0.8)
+                    for expire_min in (120, 240, 360):         # 3 (120-step 120-360, per user 2026-05-16)
+                        grid.append(ORBConfig(
+                            risk_pct=RISK_PCT,
+                            range_minutes=range_min,
+                            buffer_pts=0,
+                            min_range_pts=0,         # range filter DISABLED to match live (was 200)
+                            max_range_pts=999999,    # range filter DISABLED to match live (was 5000)
+                            fixed_sl_pts=fixed_sl,
+                            rr_ratio=rr,
+                            half_tp_ratio=htp,
+                            pending_expire_minutes=expire_min,
+                            daily_target_pct=0.0,
+                            daily_loss_pct=0.0,
+                            ldn_enabled=ldn_on, ldn_start_hour=7,
+                            ny_enabled=ny_on, ny_start_hour=13,
+                            comment="ORB",
+                        ))
     return grid
 
 
@@ -347,7 +361,7 @@ def main():
 
         print("=" * 84)
         print(f"  WFO ORB session={args.session} phase={args.phase}  {phase_label}")
-        print(f"  {SIM_SPREAD_PTS}pt friction, 3% risk, $10k -- {len(configs)} combos")
+        print(f"  {SIM_SPREAD_PTS}pt friction, {RISK_PCT}% risk, $10k -- {len(configs)} combos")
         print(f"  out_dir: {out_dir}")
         print("=" * 84)
 

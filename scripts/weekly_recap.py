@@ -30,8 +30,61 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 CALIB_LOG = ROOT / "output" / "live_calibration_log.csv"
+PROJECTION_PATH = ROOT / "output" / "forward_projection.json"
 DEFAULT_SYMBOL = "XAUUSD.sc"
-STREAM_NAMES = {1000: "FBO", 2000: "ORB", 3000: "LSFVG", 4000: "EMP"}
+STREAM_NAMES = {1000: "FBO", 2000: "ORB", 3000: "LSFVG", 4000: "EMP",
+                1111: "ORB_S1", 2222: "ORB_S2", 3333: "ORB_S3",
+                4444: "ORB_S4", 5555: "ORB_S5", 6666: "ORB_S6"}
+
+
+def print_projection_vs_actual_weekly(week_np: float, current_balance: float, days: int) -> None:
+    """Compare actual week NP vs View C projection from output/forward_projection.json."""
+    if not PROJECTION_PATH.exists():
+        return
+    try:
+        import json as _json
+        proj = _json.loads(PROJECTION_PATH.read_text())
+    except Exception:
+        return
+
+    base_bal = float(proj.get("baseline_balance", current_balance))
+    scale = current_balance / base_bal if base_bal > 0 else 1.0
+    wk = proj.get("weekly_live", {})
+    tol = proj.get("tolerance", {})
+
+    # If window is not 7 days, prorate the projection.
+    prorate = days / 7.0 if days > 0 else 1.0
+    weekly_mean = wk.get("mean_np", 0.0) * scale * prorate
+    weekly_p10 = wk.get("p10_np", 0.0) * scale * prorate
+    weekly_p90 = wk.get("p90_np", 0.0) * scale * prorate
+    weekly_worst = wk.get("worst_np", 0.0) * scale * prorate
+    week_red_trip = tol.get("single_week_red_usd", -50_000.0) * scale * prorate
+    green_prob = wk.get("green_week_prob", 0.0)
+
+    def status(actual, p10, p90, mean):
+        if actual >= p90: return "ABOVE p90 (top 10%)"
+        if actual >= mean: return "above mean"
+        if actual >= p10: return "in expected range"
+        return "BELOW p10 (bottom 10%)"
+
+    print("\n" + "=" * 84)
+    print(f"  WEEKLY PROJECTION vs ACTUAL (View C, setfile: {proj.get('setfile', '?')})")
+    print(f"  Method: decay {proj.get('decay_factor', 0):.2f} x live haircut {proj.get('live_haircut_np', 0):.2f}"
+          f" = combined {proj.get('combined_haircut', 0):.3f}    avg slope {proj.get('avg_oos_slope_pct', 0):+.1f}%")
+    if abs(scale - 1.0) > 0.01:
+        print(f"  Balance-scaled to ${current_balance:,.0f} (proj baseline ${base_bal:,.0f}, x{scale:.2f})")
+    if abs(prorate - 1.0) > 0.01:
+        print(f"  Window prorated to {days}d (projection is per 7d, x{prorate:.2f})")
+    print("-" * 84)
+    print(f"  Actual {days}d NP:        ${week_np:>+12,.0f}   ROI: {week_np / max(current_balance,1) * 100:+.2f}% on ${current_balance:,.0f}")
+    print(f"  Expected mean:          ${weekly_mean:>+12,.0f}")
+    print(f"  Expected range (p10-p90):  ${weekly_p10:>+12,.0f}  to  ${weekly_p90:+,.0f}")
+    print(f"  Worst sim week (post-haircut): ${weekly_worst:+,.0f}")
+    print(f"  Green-week probability: {green_prob*100:.0f}%")
+    print(f"  Status: {status(week_np, weekly_p10, weekly_p90, weekly_mean)}")
+    if week_np <= week_red_trip:
+        print(f"  !! Investigation trigger breached: ${week_np:+,.0f} <= ${week_red_trip:+,.0f}")
+    print("=" * 84)
 
 
 def main() -> int:
@@ -64,7 +117,18 @@ def main() -> int:
         print("=" * 84)
         print(f"  Current balance: ${ai.balance:,.2f}   Equity: ${ai.equity:,.2f}")
 
-        deals = mt5.history_deals_get(start, end) or ()
+        # BROKER-TZ FIX: history_deals_get reads datetime args as broker
+        # wall-clock (Vantage = UTC+3 summer / UTC+2 winter, auto-detected).
+        # Pass shifted bounds + filter strictly to broker-as-epoch range.
+        # See feedback_no_unverified_account_claims.md.
+        from zgb_sim.mt5_accounts import get_broker_offset
+        broker_off = get_broker_offset(args.symbol)
+        mt5_start = start + broker_off
+        mt5_end = max(end, datetime.now(timezone.utc)) + broker_off
+        s_epoch = int(mt5_start.timestamp())
+        e_epoch = int(mt5_end.timestamp())
+        raw = mt5.history_deals_get(mt5_start, mt5_end) or ()
+        deals = [d for d in raw if s_epoch <= d.time <= e_epoch]
         # Filter to symbol; keep only EXIT deals (carry realized P&L)
         exits = [d for d in deals if d.symbol == args.symbol and d.entry == 1]
 
@@ -148,6 +212,30 @@ def main() -> int:
             if ai.balance > 0:
                 roi_pct = grand_net / (ai.balance - grand_net) * 100  # ROI on starting balance
                 print(f"  ROI:             {roi_pct:+.2f}%")
+
+        # Projection comparison (View C — read output/forward_projection.json)
+        prod_magics = {1111, 2222, 3333, 4444, 5555, 6666}
+        prod_week_np = sum(s["net"] for m, s in weekly_stream.items() if m in prod_magics)
+        print_projection_vs_actual_weekly(prod_week_np, ai.balance, args.days)
+
+        # Push to dt818-console (fails-open if .env unconfigured).
+        try:
+            from zgb_sim.cf_publish import publish_weekly_recap
+            by_stream_dict = {STREAM_NAMES.get(m, f"m{m}"): {
+                "trades": s["trades"], "wins": s["wins"], "losses": s["losses"],
+                "gross_profit": s["gross_profit"], "gross_loss": s["gross_loss"],
+                "net": s["net"],
+            } for m, s in weekly_stream.items()}
+            publish_weekly_recap(
+                week_ending=end.date().isoformat(), days=args.days,
+                net_pnl=float(grand_net), balance_end=float(ai.balance),
+                trades=sum(s["trades"] for s in weekly_stream.values()),
+                wins=sum(s["wins"] for s in weekly_stream.values()),
+                losses=sum(s["losses"] for s in weekly_stream.values()),
+                by_stream=by_stream_dict,
+            )
+        except Exception as e:
+            print(f"  [cf_publish] skipped: {type(e).__name__}: {e}")
 
         # Append calibration row (just live numbers; sim cross-check is a future addition)
         CALIB_LOG.parent.mkdir(parents=True, exist_ok=True)

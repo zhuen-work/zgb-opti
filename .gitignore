@@ -11,6 +11,10 @@ __pycache__/
 venv/
 env/
 
+# Local secrets (dt818-console push tokens)
+.env
+.env.local
+
 # VSCode
 .vscode/
 

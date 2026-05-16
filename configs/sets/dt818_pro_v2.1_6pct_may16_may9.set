@@ -1,0 +1,117 @@
+; DT818_pro_v2.1 - 6-stream ORB rank portfolio (no hedge), 6.0% total per setup
+; Generated 2026-05-16. Range filter disabled (per WFO 2026-05-13 Option A).
+;
+; ROTATION 2026-05-16:
+;   S1/S2/S3: PREVIOUS-week WFO top 3 (wfo_orb_may9, ran 2026-05-16)
+;   S4/S5/S6: CURRENT-week  WFO top 3 (wfo_orb_may16, ran 2026-05-16)
+;
+; DUPLICATE-SKIP POLICY (user pref 2026-05-16):
+;   MAY16 rank #1 (SL=550/RR=3.5/HTP=0.2) duplicated MAY9 rank #2 -> SKIPPED
+;   MAY16 rank #5 (SL=700/RR=2.5/HTP=0.4) duplicated MAY9 rank #1 -> SKIPPED
+;   S4/S5/S6 use MAY16 ranks #2, #3, #4 (next distinct picks).
+;
+; PREVIOUS week (wfo_orb_may9, 60pt friction, 6% risk WFO):
+;   S1 rank 1: Range=90/SL=700/RR=2.5/HTP=0.4   P0=PASS slope=+17.3%  NP/DD=+1593
+;   S2 rank 2: Range=90/SL=550/RR=3.5/HTP=0.2   P0=PASS slope=-15.6%  NP/DD=+1398
+;   S3 rank 3: Range=90/SL=400/RR=4.0/HTP=0.6   P0=FAIL slope=-73.0%  NP/DD=+1099
+;
+; CURRENT week (wfo_orb_may16, 60pt friction, 6% risk WFO):
+;   S4 rank 2: Range=90/SL=550/RR=4.0/HTP=0.4   P0=FAIL slope=-85.7%  NP/DD=+1421
+;   S5 rank 3: Range=90/SL=550/RR=3.5/HTP=0.4   P0=FAIL slope=-47.7%  NP/DD=+2010
+;   S6 rank 4: Range=90/SL=550/RR=3.0/HTP=0.4   P0=FAIL slope=-54.6%  NP/DD=+1555
+;
+; All swept dims interior to grid -- no boundary truncation on either WFO.
+; All 6 streams share Range=90 / Expire=240min -- consistent cross-regime.
+; _RiskPct = 1.5 per stream so total when all 6 fire together = 6.0%.
+;
+; Spread guard: _MaxSpreadPts=60 (Vantage max observed 32pt; SIM_SPREAD_PTS=60 in WFO friction)
+
+; ===== Global account =====
+_CapitalProtectionAmount=0.0||0.0||1||0.0||0.0||N
+_RiskPct=1.0||1.0||1||1.0||1.0||N
+_LotMode=1||1||1||1||1||N
+TierBase=2000||2000||1||2000||2000||N
+LotStep=0.01||0.01||1||0.01||0.01||N
+_MaxSpreadPts=60||60||1||60||60||N
+
+; ===== ORB shared params =====
+_BrokerGMTOffsetHours=0||0||1||0||0||N  ; DEPRECATED post 2026-05-07 (EA uses TimeGMT)
+_ORB_BufferPts=0||0||1||0||0||N
+_ORB_MinRangePts=0||0||1||0||0||N             ; range filter DISABLED per WFO 2026-05-13 Option A
+_ORB_MaxRangePts=999999||999999||1||999999||999999||N ; range filter DISABLED per WFO 2026-05-13 Option A
+_ORB_LDN_Enabled=true
+_ORB_LDN_StartHour=4||4||1||4||4||N
+_ORB_NY_Enabled=true
+_ORB_NY_StartHour=10||10||1||10||10||N
+
+; ===== ORB_S1 -- PREVIOUS week (MAY9) rank 1 (magic 1111) =====
+_ORB_S1_Enabled=true
+_ORB_S1_Magic=1111||1111||1||1111||1111||N
+_ORB_S1_Comment=ORB_S1
+_ORB_S1_RangeMinutes=90||90||1||90||90||N
+_ORB_S1_FixedSL_Pts=700||700||1||700||700||N
+_ORB_S1_RR_Ratio=2.5||2.5||1||2.5||2.5||N
+_ORB_S1_HalfTP_Ratio=0.4||0.4||1||0.4||0.4||N
+_ORB_S1_PendingExpireMinutes=240||240||1||240||240||N
+_ORB_S1_DailyTargetPct=0.0||0.0||1||0.0||0.0||N
+_ORB_S1_DailyLossPct=0.0||0.0||1||0.0||0.0||N
+
+; ===== ORB_S2 -- PREVIOUS week (MAY9) rank 2 (magic 2222) =====
+_ORB_S2_Enabled=true
+_ORB_S2_Magic=2222||2222||1||2222||2222||N
+_ORB_S2_Comment=ORB_S2
+_ORB_S2_RangeMinutes=90||90||1||90||90||N
+_ORB_S2_FixedSL_Pts=550||550||1||550||550||N
+_ORB_S2_RR_Ratio=3.5||3.5||1||3.5||3.5||N
+_ORB_S2_HalfTP_Ratio=0.2||0.2||1||0.2||0.2||N
+_ORB_S2_PendingExpireMinutes=240||240||1||240||240||N
+_ORB_S2_DailyTargetPct=0.0||0.0||1||0.0||0.0||N
+_ORB_S2_DailyLossPct=0.0||0.0||1||0.0||0.0||N
+
+; ===== ORB_S3 -- PREVIOUS week (MAY9) rank 3 (magic 3333) =====
+_ORB_S3_Enabled=true
+_ORB_S3_Magic=3333||3333||1||3333||3333||N
+_ORB_S3_Comment=ORB_S3
+_ORB_S3_RangeMinutes=90||90||1||90||90||N
+_ORB_S3_FixedSL_Pts=400||400||1||400||400||N
+_ORB_S3_RR_Ratio=4.0||4.0||1||4.0||4.0||N
+_ORB_S3_HalfTP_Ratio=0.6||0.6||1||0.6||0.6||N
+_ORB_S3_PendingExpireMinutes=240||240||1||240||240||N
+_ORB_S3_DailyTargetPct=0.0||0.0||1||0.0||0.0||N
+_ORB_S3_DailyLossPct=0.0||0.0||1||0.0||0.0||N
+
+; ===== ORB_S4 -- CURRENT week (MAY16) rank 2 (magic 4444) -- rank 1 skipped (dup of S2) =====
+_ORB_S4_Enabled=true
+_ORB_S4_Magic=4444||4444||1||4444||4444||N
+_ORB_S4_Comment=ORB_S4
+_ORB_S4_RangeMinutes=90||90||1||90||90||N
+_ORB_S4_FixedSL_Pts=550||550||1||550||550||N
+_ORB_S4_RR_Ratio=4.0||4.0||1||4.0||4.0||N
+_ORB_S4_HalfTP_Ratio=0.4||0.4||1||0.4||0.4||N
+_ORB_S4_PendingExpireMinutes=240||240||1||240||240||N
+_ORB_S4_DailyTargetPct=0.0||0.0||1||0.0||0.0||N
+_ORB_S4_DailyLossPct=0.0||0.0||1||0.0||0.0||N
+
+; ===== ORB_S5 -- CURRENT week (MAY16) rank 3 (magic 5555) =====
+_ORB_S5_Enabled=true
+_ORB_S5_Magic=5555||5555||1||5555||5555||N
+_ORB_S5_Comment=ORB_S5
+_ORB_S5_RangeMinutes=90||90||1||90||90||N
+_ORB_S5_FixedSL_Pts=550||550||1||550||550||N
+_ORB_S5_RR_Ratio=3.5||3.5||1||3.5||3.5||N
+_ORB_S5_HalfTP_Ratio=0.4||0.4||1||0.4||0.4||N
+_ORB_S5_PendingExpireMinutes=240||240||1||240||240||N
+_ORB_S5_DailyTargetPct=0.0||0.0||1||0.0||0.0||N
+_ORB_S5_DailyLossPct=0.0||0.0||1||0.0||0.0||N
+
+; ===== ORB_S6 -- CURRENT week (MAY16) rank 4 (magic 6666) -- rank 5 also skipped (dup of S1) =====
+_ORB_S6_Enabled=true
+_ORB_S6_Magic=6666||6666||1||6666||6666||N
+_ORB_S6_Comment=ORB_S6
+_ORB_S6_RangeMinutes=90||90||1||90||90||N
+_ORB_S6_FixedSL_Pts=550||550||1||550||550||N
+_ORB_S6_RR_Ratio=3.0||3.0||1||3.0||3.0||N
+_ORB_S6_HalfTP_Ratio=0.4||0.4||1||0.4||0.4||N
+_ORB_S6_PendingExpireMinutes=240||240||1||240||240||N
+_ORB_S6_DailyTargetPct=0.0||0.0||1||0.0||0.0||N
+_ORB_S6_DailyLossPct=0.0||0.0||1||0.0||0.0||N
