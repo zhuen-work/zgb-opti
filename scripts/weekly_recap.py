@@ -34,7 +34,12 @@ PROJECTION_PATH = ROOT / "output" / "forward_projection.json"
 DEFAULT_SYMBOL = "XAUUSD.sc"
 STREAM_NAMES = {1000: "FBO", 2000: "ORB", 3000: "LSFVG", 4000: "EMP",
                 1111: "ORB_S1", 2222: "ORB_S2", 3333: "ORB_S3",
-                4444: "ORB_S4", 5555: "ORB_S5", 6666: "ORB_S6"}
+                4444: "ORB_S4", 5555: "ORB_S5", 6666: "ORB_S6",
+                # v3 reverse-hedge magics (deployed 2026-05-18)
+                8111: "ORB_S1r", 8222: "ORB_S2r", 8333: "ORB_S3r",
+                8444: "ORB_S4r", 8555: "ORB_S5r", 8666: "ORB_S6r"}
+PARENT_MAGICS = {1111, 2222, 3333, 4444, 5555, 6666}
+HEDGE_MAGICS  = {8111, 8222, 8333, 8444, 8555, 8666}
 
 
 def print_projection_vs_actual_weekly(week_np: float, current_balance: float, days: int) -> None:
@@ -213,8 +218,10 @@ def main() -> int:
                 roi_pct = grand_net / (ai.balance - grand_net) * 100  # ROI on starting balance
                 print(f"  ROI:             {roi_pct:+.2f}%")
 
-        # Projection comparison (View C — read output/forward_projection.json)
-        prod_magics = {1111, 2222, 3333, 4444, 5555, 6666}
+        # Projection comparison (read output/forward_projection.json)
+        # v3 era: include both parent (1xxx-6xxx) and reverse-hedge (8xxx) magics
+        # to compare total v3 portfolio P&L vs sim projection.
+        prod_magics = PARENT_MAGICS | HEDGE_MAGICS
         prod_week_np = sum(s["net"] for m, s in weekly_stream.items() if m in prod_magics)
         print_projection_vs_actual_weekly(prod_week_np, ai.balance, args.days)
 

@@ -310,6 +310,9 @@ def main() -> int:
                 with _u.urlopen(req, timeout=10) as resp:
                     body = _json.loads(resp.read().decode())
                 today_deals = body.get("today_deals") or []
+                # Friction is apples-to-apples PARENT vs PARENT (this script's sim
+                # only runs parent ORB; hedge contribution is excluded). For full
+                # v3 portfolio friction (parent+hedge) use sim_orb_oos_today_hedge.py.
                 prod_magics = {1111, 2222, 3333, 4444, 5555, 6666}
                 live_today = sum(float(d.get("profit", 0))
                                   for d in today_deals if int(d.get("magic", 0)) in prod_magics)

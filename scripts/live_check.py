@@ -113,16 +113,25 @@ PROJECTION_PATH = ROOT / "output" / "forward_projection.json"
 # and will fall through to the "m<magic>" fallback labelling.
 STREAM_NAMES = {1111: "ORB_S1", 2222: "ORB_S2", 3333: "ORB_S3",
                 4444: "ORB_S4", 5555: "ORB_S5", 6666: "ORB_S6",
+                # v2.1_h retry-hedge magics (legacy 7xxx, retired 2026-05-16)
                 7111: "ORB_S1h", 7222: "ORB_S2h", 7333: "ORB_S3h",
                 7444: "ORB_S4h", 7555: "ORB_S5h", 7666: "ORB_S6h",
+                # v3 reverse-hedge magics (8xxx, deployed 2026-05-18)
+                8111: "ORB_S1r", 8222: "ORB_S2r", 8333: "ORB_S3r",
+                8444: "ORB_S4r", 8555: "ORB_S5r", 8666: "ORB_S6r",
                 5111: "HEDGE_S1", 5222: "HEDGE_S2", 5333: "HEDGE_S3"}
-# Active v2 stream-source mapping. Update at every Sat reopt:
+# Parent magics vs hedge magics — used for parent-vs-hedge split in summaries
+PARENT_MAGICS = {1111, 2222, 3333, 4444, 5555, 6666}
+HEDGE_MAGICS  = {8111, 8222, 8333, 8444, 8555, 8666}  # v3 reverse-hedge
+# Active stream-source mapping. Update at every Sat reopt:
 #   S1-3 = PREVIOUS-week WFO  |  S4-6 = CURRENT-week WFO
 # Last rotation: 2026-05-16 (S1-3 = MAY9 R1-3 / S4-6 = MAY16 R2/R3/R4, dup-skipped)
+# Hedge round 5: tp/sl per stream from wfo_hedge_reverse_may16/winner_round5.json
 STREAM_SOURCE = {1111: "MAY9 R1 (prev)", 2222: "MAY9 R2 (prev)", 3333: "MAY9 R3 (prev)",
                  4444: "MAY16 R2 (curr)", 5555: "MAY16 R3 (curr)", 6666: "MAY16 R4 (curr)",
-                 7111: "retry S1 tp=1.0", 7222: "retry S2 tp=0.75", 7333: "retry S3 tp=0.75",
-                 7444: "retry S4 tp=1.0", 7555: "retry S5 tp=0.75", 7666: "retry S6 tp=0.75"}
+                 8111: "rev S1 tp=5.0 sl=1.0", 8222: "rev S2 tp=6.0 sl=1.0",
+                 8333: "rev S3 tp=8.5 sl=1.25", 8444: "rev S4 tp=6.0 sl=1.0",
+                 8555: "rev S5 tp=6.0 sl=1.0", 8666: "rev S6 tp=6.0 sl=1.0"}
 # XAUUSD.sc reports trade_contract_size=1.0 in symbol_info but realized P&L
 # reconciles only with 100 oz/lot. Verified via order history 2026-05-03.
 CONTRACT_SIZE = 100
@@ -376,18 +385,50 @@ def main() -> int:
             if not by_magic:
                 print(f"  No deals in window.")
                 return
-            print(f"  {'Stream':<8} {'Magic':>5} {'Trades':>6} {'W/L':>6} {'Gross+':>10} {'Gross-':>10} {'Net':>10}")
-            grand_net = 0.0
-            for mag in sorted(by_magic):
-                a = by_magic[mag]
+
+            def fmt_row(mag, a):
                 stream = STREAM_NAMES.get(mag, f"m{mag}")
                 wl = f"{a['wins']}/{a['losses']}"
                 pf = a["gross_profit"] / abs(a["gross_loss"]) if a["gross_loss"] < 0 else float("inf")
-                print(f"  {stream:<8} {mag:>5} {a['trades']:>6} {wl:>6} "
-                      f"${a['gross_profit']:>+8,.0f} ${a['gross_loss']:>+8,.0f} "
-                      f"${a['net']:>+8,.0f}  PF={pf:.2f}")
-                grand_net += a["net"]
-            print(f"  TOTAL net P&L: ${grand_net:+,.2f}")
+                return (f"  {stream:<8} {mag:>5} {a['trades']:>6} {wl:>6} "
+                        f"${a['gross_profit']:>+8,.0f} ${a['gross_loss']:>+8,.0f} "
+                        f"${a['net']:>+8,.0f}  PF={pf:.2f}")
+
+            parent_mags = sorted(m for m in by_magic if m in PARENT_MAGICS)
+            hedge_mags  = sorted(m for m in by_magic if m in HEDGE_MAGICS)
+            other_mags  = sorted(m for m in by_magic if m not in PARENT_MAGICS and m not in HEDGE_MAGICS)
+
+            hdr = f"  {'Stream':<8} {'Magic':>5} {'Trades':>6} {'W/L':>6} {'Gross+':>10} {'Gross-':>10} {'Net':>10}"
+            parent_net = sum(by_magic[m]["net"] for m in parent_mags)
+            hedge_net  = sum(by_magic[m]["net"] for m in hedge_mags)
+            other_net  = sum(by_magic[m]["net"] for m in other_mags)
+
+            if parent_mags:
+                print(f"  [PARENT streams]")
+                print(hdr)
+                for m in parent_mags:
+                    print(fmt_row(m, by_magic[m]))
+                print(f"  PARENT subtotal: ${parent_net:+,.2f}  ({sum(by_magic[m]['trades'] for m in parent_mags)} trades)")
+            if hedge_mags:
+                print(f"\n  [HEDGE streams (reverse, below parent)]")
+                print(hdr)
+                for m in hedge_mags:
+                    print(fmt_row(m, by_magic[m]))
+                print(f"  HEDGE subtotal:  ${hedge_net:+,.2f}  ({sum(by_magic[m]['trades'] for m in hedge_mags)} trades)")
+                if parent_net != 0:
+                    contrib = hedge_net / abs(parent_net) * 100
+                    print(f"  HEDGE contribution: {contrib:+.1f}% of |parent_net|")
+            if other_mags:
+                print(f"\n  [OTHER magics (legacy / non-stream)]")
+                print(hdr)
+                for m in other_mags:
+                    print(fmt_row(m, by_magic[m]))
+                print(f"  OTHER subtotal:  ${other_net:+,.2f}")
+
+            grand_net = parent_net + hedge_net + other_net
+            print(f"\n  TOTAL net P&L: ${grand_net:+,.2f}  "
+                  f"(parent ${parent_net:+,.0f} + hedge ${hedge_net:+,.0f}"
+                  f"{f' + other ${other_net:+,.0f}' if other_net else ''})")
 
         by_magic, events_to_journal = aggregate(start, end, collect_events=True)
         print_summary(by_magic, "Daily window (since last check)")
@@ -466,9 +507,9 @@ def main() -> int:
                       f"{(d.comment or '')[:28]:<28}")
 
         # Projection comparison (View C — read output/forward_projection.json)
-        # Restrict to the 6 live ORB-stream magics so other historical magics
-        # don't pollute the comparison.
-        prod_magics = {1111, 2222, 3333, 4444, 5555, 6666}
+        # Include BOTH parent (1xxx-6xxx) and v3 hedge (8xxx) magics to compare
+        # total v3 portfolio P&L vs sim projection (which is parent + hedge combined).
+        prod_magics = PARENT_MAGICS | HEDGE_MAGICS
         today_np = sum(a["net"] for m, a in by_magic.items() if m in prod_magics)
         wtd_start = end - timedelta(days=7)
         wtd_by_magic, _ = aggregate(wtd_start, end, collect_events=False)

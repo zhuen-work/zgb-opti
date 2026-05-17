@@ -45,20 +45,21 @@ from zgb_sim.wfo_helpers import (WINDOWS_MAY9 as WINDOWS, rank_with_p0,
                                   check_winner_boundaries, print_boundary_check, to_utc)
 
 SYMBOL = "XAUUSD"
-DEPOSIT = 10_000.0
-SPREAD = 23
+DEPOSIT = 10_000.0   # standard sim baseline; one-off $149k forecast at 23:17 archived in run_round6.log
+SPREAD = 30   # 2026-05-16: bumped 23->30 per user "all live = 30pt moving forward"
 POINT = 0.01
 CONTRACT = 100
 
-# v2.1_h parent params — copy from production setfile (LDN=4 = real UTC LDN
-# in Session A convention, but tick parquets are broker-time-labeled so use 7).
+# v2.1 parent params — copy from production setfile dt818_pro_v2.1_9pct_may16_may9.set.
+# Rotation 2026-05-16: S1-3 = MAY9 winners (prev week), S4-6 = MAY16 winners (curr week).
+# LDN=4 in setfile (real UTC); tick parquets are broker-time-labeled so use 7 here.
 STREAM_CFGS = {
-    "S1": dict(range_minutes=90, fixed_sl_pts=500, rr_ratio=4.0, half_tp_ratio=0.25),  # MAY2 R1
-    "S2": dict(range_minutes=90, fixed_sl_pts=400, rr_ratio=4.0, half_tp_ratio=0.0),   # MAY2 R2
-    "S3": dict(range_minutes=90, fixed_sl_pts=350, rr_ratio=4.0, half_tp_ratio=0.5),   # MAY2 R3
-    "S4": dict(range_minutes=90, fixed_sl_pts=650, rr_ratio=4.0, half_tp_ratio=0.25),  # MAY9 R1
-    "S5": dict(range_minutes=90, fixed_sl_pts=350, rr_ratio=4.0, half_tp_ratio=0.5),   # MAY9 R2
-    "S6": dict(range_minutes=90, fixed_sl_pts=400, rr_ratio=4.0, half_tp_ratio=0.5),   # MAY9 R3
+    "S1": dict(range_minutes=90, fixed_sl_pts=700, rr_ratio=2.5, half_tp_ratio=0.4),   # MAY9 R1
+    "S2": dict(range_minutes=90, fixed_sl_pts=550, rr_ratio=3.5, half_tp_ratio=0.2),   # MAY9 R2
+    "S3": dict(range_minutes=90, fixed_sl_pts=400, rr_ratio=4.0, half_tp_ratio=0.6),   # MAY9 R3
+    "S4": dict(range_minutes=90, fixed_sl_pts=550, rr_ratio=4.0, half_tp_ratio=0.4),   # MAY16 R2 (R1 dedup-skipped)
+    "S5": dict(range_minutes=90, fixed_sl_pts=550, rr_ratio=3.5, half_tp_ratio=0.4),   # MAY16 R3
+    "S6": dict(range_minutes=90, fixed_sl_pts=550, rr_ratio=3.0, half_tp_ratio=0.4),   # MAY16 R4 (R5 dedup-skipped)
 }
 
 # Retry hedge grid (v2: A + B per user request 2026-05-12)

@@ -44,6 +44,15 @@ WINDOWS_MAY16 = [
     ("W4", date(2026, 4, 11), date(2026, 5,  9), date(2026, 5,  9), date(2026, 5, 16)),
 ]
 
+# May 23 reopt — 1 week rolled forward from MAY16. Captures May 18-22 trading
+# (first week of v3 reverse-hedge live). For Sat 2026-05-23 reopt.
+WINDOWS_MAY23 = [
+    ("W1", date(2026, 3,  7), date(2026, 4,  4), date(2026, 4,  4), date(2026, 4, 18)),
+    ("W2", date(2026, 3, 21), date(2026, 4, 18), date(2026, 4, 18), date(2026, 5,  2)),
+    ("W3", date(2026, 4,  4), date(2026, 5,  2), date(2026, 5,  2), date(2026, 5, 16)),
+    ("W4", date(2026, 4, 18), date(2026, 5, 16), date(2026, 5, 16), date(2026, 5, 23)),
+]
+
 
 def to_utc(d):
     return datetime(d.year, d.month, d.day, tzinfo=timezone.utc)

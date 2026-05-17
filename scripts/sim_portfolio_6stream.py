@@ -142,6 +142,8 @@ def main() -> int:
               f"{s['rr']:<4}  {s['htp']:<4}  {s['expire']:<6}")
 
     try:
+        from zgb_sim.mt5_accounts import init_account
+        init_account("sim")
         m = symbol_meta(SYMBOL)
         meta = SymbolMeta(point=m["point"], digits=m["digits"], tick_size=m["tick_size"],
                           tick_value=m["tick_value"], stops_level_pts=m["stops_level"],

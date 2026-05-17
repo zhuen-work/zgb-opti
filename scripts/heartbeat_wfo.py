@@ -75,12 +75,38 @@ if m:
     phase_a_label = (f"{N_IS_WINDOWS} x {per_win_min} min = ~{phase_a_total_hours:.1f}h total "
                      f"(W{cur_window_n} in progress, {windows_after_current} after)")
 else:
-    done = total = 0; rate = 0.0; cur_eta_s = 0
-    sub_sweep_min = per_win_min = 0
-    windows_after_current = N_IS_WINDOWS - 1
-    eta_label = "? (no progress data yet)"
-    cur_window_n = 1
-    phase_a_label = "starting"
+    # Fallback: parse window-level progress lines from reverse-hedge / single-thread WFOs
+    # Lines look like:  "  W1 IS 2026-02-28->2026-03-28 done streams=6  [992s]"
+    # Each line = one fold+label done; total windows = 4 IS + 4 OOS = 8.
+    win_re = re.compile(r"\s*(W\d+)\s+(IS|OOS)\s+\d{4}-\d{2}-\d{2}->\d{4}-\d{2}-\d{2}\s+done streams=\d+\s+\[(\d+)s\]")
+    wins_done = list(win_re.finditer(log))
+    N_TOTAL_WINS = N_IS_WINDOWS * 2  # IS + OOS
+    if wins_done:
+        n_wins = len(wins_done)
+        latest_elapsed_s = int(wins_done[-1].group(3))
+        avg_per_win_s = latest_elapsed_s / n_wins
+        wins_left = max(0, N_TOTAL_WINS - n_wins)
+        sub_sweep_min = 0
+        per_win_min = int(avg_per_win_s // 60)
+        done = n_wins; total = N_TOTAL_WINS
+        cur_window_n = min(n_wins + 1, N_IS_WINDOWS)
+        rate = 0.0  # no cfg/s granularity in this script
+        windows_after_current = wins_left
+        # Phase C/B/D inline in the per-window timing — only final aggregation remains
+        post_sweep_overhead_min = 5
+        total_remaining_min = int(wins_left * avg_per_win_s / 60) + post_sweep_overhead_min
+        total_eta = (now + timedelta(minutes=total_remaining_min)).strftime("%H:%M")
+        hours_from_now = total_remaining_min / 60.0
+        eta_label = f"{total_eta} (~{hours_from_now:.1f}h from now)"
+        phase_a_label = (f"{n_wins}/{N_TOTAL_WINS} windows done, avg ~{per_win_min} min/window "
+                         f"({wins_left} remaining)")
+    else:
+        done = total = 0; rate = 0.0; cur_eta_s = 0
+        sub_sweep_min = per_win_min = 0
+        windows_after_current = N_IS_WINDOWS - 1
+        eta_label = "? (no progress data yet)"
+        cur_window_n = 1
+        phase_a_label = "starting"
 
 # Emit markdown table
 print(f"| **Heartbeat - {hh} (+{elapsed_min}m elapsed)** |  |")

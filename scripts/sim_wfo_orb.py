@@ -66,21 +66,27 @@ PENDING_EXPIRE_MIN = 240  # legacy default; sweep dim added 2026-05-15 (see grid
 # ny_start_hour=16 (broker labels for real UTC 07/13). See sim_wfo_orb_realutc.py
 # for that variant. Verified 2026-05-11.
 
-from zgb_sim.wfo_helpers import (WINDOWS_MAY9, WINDOWS_MAY16, rank_with_p0,
+from zgb_sim.wfo_helpers import (WINDOWS_MAY9, WINDOWS_MAY16, WINDOWS_MAY23,
+                                  rank_with_p0,
                                   print_phase_d_with_p0, select_winner_with_p0,
                                   check_winner_boundaries, print_boundary_check)
 
-# Default WFO window set. Override via env: ZGB_WFO_WINDOWS={may9|may16}.
-# MAY16 windows are 1 week rolled forward from MAY9 (last OOS = 2026-05-09 -> 2026-05-16).
+# Default WFO window set. Override via env: ZGB_WFO_WINDOWS={may9|may16|may23}.
+# Each MAY{N} windows set is 1 week rolled forward from MAY{N-7}.
 import os as _os
 _WFO_WIN_TAG = _os.environ.get("ZGB_WFO_WINDOWS", "may9").lower()
-if _WFO_WIN_TAG == "may16":
+if _WFO_WIN_TAG == "may23":
+    WINDOWS = WINDOWS_MAY23
+    PREWARM_START = date(2026, 3,  5)  # MAY23 W1 IS starts Mar 7, 2-day pad
+    PREWARM_END   = date(2026, 5, 23)
+elif _WFO_WIN_TAG == "may16":
     WINDOWS = WINDOWS_MAY16
     PREWARM_START = date(2026, 2, 26)
+    PREWARM_END   = date(2026, 5, 16)
 else:
     WINDOWS = WINDOWS_MAY9
     PREWARM_START = date(2026, 2, 19)  # MAY9 W1 IS starts Feb 21, give 2-day pad
-PREWARM_END   = date(2026, 5,  9)  # MAY9 W4 OOS ends May 9 (covers May 8 close)
+    PREWARM_END   = date(2026, 5,  9)
 
 
 def session_flags(session: str):

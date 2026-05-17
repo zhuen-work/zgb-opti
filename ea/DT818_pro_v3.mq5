@@ -199,6 +199,7 @@ input int     _HEDGE_S1_ExpireMinutes          = 120;
 input double  _HEDGE_S1_RiskPct                = 1.5;
 input int     _HEDGE_S1_MaxSecondsAfterEntry   = 3600;
 input double  _HEDGE_S1_TPMult                 = 1.0;
+input double  _HEDGE_S1_SLMult                 = 1.0;
 
 //====================================================================
 // HEDGE_S2r — reverse hedge sub-stream for ORB_S2 (magic 8222)
@@ -214,6 +215,7 @@ input int     _HEDGE_S2_ExpireMinutes          = 120;
 input double  _HEDGE_S2_RiskPct                = 1.5;
 input int     _HEDGE_S2_MaxSecondsAfterEntry   = 3600;
 input double  _HEDGE_S2_TPMult                 = 1.0;
+input double  _HEDGE_S2_SLMult                 = 1.0;
 
 //====================================================================
 // HEDGE_S3r — reverse hedge sub-stream for ORB_S3 (magic 8333)
@@ -229,6 +231,7 @@ input int     _HEDGE_S3_ExpireMinutes          = 120;
 input double  _HEDGE_S3_RiskPct                = 1.5;
 input int     _HEDGE_S3_MaxSecondsAfterEntry   = 3600;
 input double  _HEDGE_S3_TPMult                 = 1.0;
+input double  _HEDGE_S3_SLMult                 = 1.0;
 
 //====================================================================
 // HEDGE_S4r — reverse hedge sub-stream for ORB_S4 (magic 8444)
@@ -244,6 +247,7 @@ input int     _HEDGE_S4_ExpireMinutes          = 120;
 input double  _HEDGE_S4_RiskPct                = 1.5;
 input int     _HEDGE_S4_MaxSecondsAfterEntry   = 3600;
 input double  _HEDGE_S4_TPMult                 = 1.0;
+input double  _HEDGE_S4_SLMult                 = 1.0;
 
 //====================================================================
 // HEDGE_S5r — reverse hedge sub-stream for ORB_S5 (magic 8555)
@@ -259,6 +263,7 @@ input int     _HEDGE_S5_ExpireMinutes          = 120;
 input double  _HEDGE_S5_RiskPct                = 1.5;
 input int     _HEDGE_S5_MaxSecondsAfterEntry   = 3600;
 input double  _HEDGE_S5_TPMult                 = 1.0;
+input double  _HEDGE_S5_SLMult                 = 1.0;
 
 //====================================================================
 // HEDGE_S6r — reverse hedge sub-stream for ORB_S6 (magic 8666)
@@ -274,6 +279,7 @@ input int     _HEDGE_S6_ExpireMinutes          = 120;
 input double  _HEDGE_S6_RiskPct                = 1.5;
 input int     _HEDGE_S6_MaxSecondsAfterEntry   = 3600;
 input double  _HEDGE_S6_TPMult                 = 1.0;
+input double  _HEDGE_S6_SLMult                 = 1.0;
 
 //====================================================================
 // Globals
@@ -341,7 +347,9 @@ struct HedgeStreamCfg
    int    expire_minutes;
    double risk_pct;
    int    max_seconds_after_entry;
-   double tp_mult;        // multiplier on parent's TP distance for retry (1.0 = exact parent TP)
+   double tp_mult;        // hedge TP distance = parent_sl_dist * tp_mult (1.0 = exact parent SL distance)
+   double sl_mult;        // hedge SL distance = parent_sl_dist * sl_mult (1.0 = exact parent SL distance)
+                          // hedge lots are scaled by 1/sl_mult to keep dollar-risk equal to parent's 1.5%
 };
 HedgeStreamCfg g_hedge_s1, g_hedge_s2, g_hedge_s3, g_hedge_s4, g_hedge_s5, g_hedge_s6;
 
@@ -842,8 +850,10 @@ void ProcessHedgeStream(HedgeStreamCfg &hcfg)
       // Parent SELL: entry below SL,  TP below entry  → reverse BUY:  SL below entry,  TP above entry
       //
       // Use parent's SL distance (= |entry - orig_sl|) as the canonical risk unit.
-      // hedge_tp_dist = tp_mult * sl_dist (mirror, scaled by tp_mult).
+      // hedge_sl_dist = sl_mult * sl_dist (mirror, scaled by sl_mult).
+      // hedge_tp_dist = tp_mult * sl_dist (mirror, scaled by tp_mult relative to PARENT SL, not hedge SL).
       double sl_dist = MathAbs(orig_entry - orig_sl);
+      double hedge_sl_dist = sl_dist * hcfg.sl_mult;
       double hedge_tp_dist = sl_dist * hcfg.tp_mult;
       double hedge_sl, hedge_tp;
       ENUM_ORDER_TYPE hedge_type;
@@ -851,14 +861,14 @@ void ProcessHedgeStream(HedgeStreamCfg &hcfg)
       {
          // Parent was BUY → reverse hedge is SELL_LIMIT
          hedge_type = ORDER_TYPE_SELL_LIMIT;
-         hedge_sl   = NormPrice(orig_entry + sl_dist);          // above entry (SELL SL)
+         hedge_sl   = NormPrice(orig_entry + hedge_sl_dist);    // above entry (SELL SL)
          hedge_tp   = NormPrice(orig_entry - hedge_tp_dist);    // below entry (SELL TP)
       }
       else if(orig_type == ORDER_TYPE_SELL_STOP)
       {
          // Parent was SELL → reverse hedge is BUY_LIMIT
          hedge_type = ORDER_TYPE_BUY_LIMIT;
-         hedge_sl   = NormPrice(orig_entry - sl_dist);          // below entry (BUY SL)
+         hedge_sl   = NormPrice(orig_entry - hedge_sl_dist);    // below entry (BUY SL)
          hedge_tp   = NormPrice(orig_entry + hedge_tp_dist);    // above entry (BUY TP)
       }
       else
@@ -908,12 +918,15 @@ void ProcessHedgeStream(HedgeStreamCfg &hcfg)
          }
       }
 
-      // Lots: copy parent's lot size exactly
+      // Lots: risk-equalized — scale parent's lots by 1/sl_mult so dollar-risk on
+      // hedge SL = dollar-risk on parent SL regardless of sl_mult. With wider hedge
+      // SL (sl_mult > 1) lots shrink; with tighter hedge SL (sl_mult < 1) lots grow.
       double vstep = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_STEP);
       double vmin  = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
       double vmax  = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MAX);
       if(vstep <= 0) vstep = 0.01;
-      double lots = MathRound(orig_lots / vstep) * vstep;
+      double sl_mult_safe = (hcfg.sl_mult > 0) ? hcfg.sl_mult : 1.0;
+      double lots = MathRound((orig_lots / sl_mult_safe) / vstep) * vstep;
       if(lots < vmin) lots = vmin;
       if(lots > vmax) lots = vmax;
       if(lots <= 0) continue;
@@ -937,11 +950,11 @@ void ProcessHedgeStream(HedgeStreamCfg &hcfg)
                      g_trade.ResultRetcodeDescription());
       else
          PrintFormat("[%s] reverse-hedge %s placed at %.5f sl=%.5f tp=%.5f lots=%.2f "
-                     "(parent pos_id=%I64d, orig order=%I64u, sl_dist=%.2fpt, tp_mult=%.2f)",
+                     "(parent pos_id=%I64d, orig order=%I64u, sl_dist=%.2fpt, sl_mult=%.2f, tp_mult=%.2f)",
                      hcfg.comment,
                      (hedge_type == ORDER_TYPE_BUY_LIMIT ? "BUY_LIMIT" : "SELL_LIMIT"),
                      orig_entry, hedge_sl, hedge_tp, lots, pos_id, orig_order,
-                     sl_dist / pt, hcfg.tp_mult);
+                     sl_dist / pt, hcfg.sl_mult, hcfg.tp_mult);
    }
    g_hedge_last_scan = now_broker;
 }
@@ -1033,7 +1046,8 @@ int OnInit()
       g_hedge_s##N.expire_minutes         = _HEDGE_S##N##_ExpireMinutes; \
       g_hedge_s##N.risk_pct               = _HEDGE_S##N##_RiskPct; \
       g_hedge_s##N.max_seconds_after_entry= _HEDGE_S##N##_MaxSecondsAfterEntry; \
-      g_hedge_s##N.tp_mult                = _HEDGE_S##N##_TPMult
+      g_hedge_s##N.tp_mult                = _HEDGE_S##N##_TPMult; \
+      g_hedge_s##N.sl_mult                = _HEDGE_S##N##_SLMult
    BUILD_HEDGE_CFG(1);
    BUILD_HEDGE_CFG(2);
    BUILD_HEDGE_CFG(3);

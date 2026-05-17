@@ -105,12 +105,42 @@ def read_per_stream_slopes(wfo_dir: Path, stream_cfgs: list[dict]) -> dict[str, 
     return out
 
 
+def is_v3_setfile(cfg: dict) -> bool:
+    """v3 setfiles include hedge per-stream TPMult/SLMult inputs."""
+    return "_HEDGE_S1_TPMult" in cfg and "_HEDGE_S1_SLMult" in cfg
+
+
+def extract_hedge_cfgs(cfg: dict) -> list[dict]:
+    """Extract hedge per-stream config from v3 setfile. Returns 6 dicts with
+    parent_magic, tp_mult, sl_mult, expire_min, f1_sec."""
+    out = []
+    # Global hedge knobs (same across all hedge streams in v3 round 5 setup)
+    expire = int(cfg.get("_HEDGE_S1_ExpireMinutes", 240))
+    f1_sec = int(cfg.get("_HEDGE_S1_MaxSecondsAfterEntry", 1800))
+    for n in range(1, 7):
+        if str(cfg.get(f"_HEDGE_S{n}_Enabled", "false")).lower() != "true":
+            continue
+        out.append({
+            "stream": f"S{n}",
+            "magic": int(cfg[f"_HEDGE_S{n}_Magic"]),
+            "parent_magic": int(cfg[f"_HEDGE_S{n}_ParentMagic"]),
+            "tp_mult": float(cfg[f"_HEDGE_S{n}_TPMult"]),
+            "sl_mult": float(cfg[f"_HEDGE_S{n}_SLMult"]),
+            "r_ratio": float(cfg[f"_HEDGE_S{n}_TPMult"]) / float(cfg[f"_HEDGE_S{n}_SLMult"]),
+            "expire_min": expire,
+            "f1_sec": f1_sec,
+        })
+    return out
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--setfile", default="configs/sets/dt818_pro_v2.1_9pct_may16_may9.set")
-    ap.add_argument("--start", default="2026-03-14")
-    ap.add_argument("--end", default="2026-05-02")
-    ap.add_argument("--spread", type=int, default=60)
+    ap.add_argument("--setfile", default="configs/sets/dt818_pro_v3_9pct_may16_may9.set",
+                    help="Setfile path. v3 setfiles (with HEDGE_Sn_TPMult/SLMult) auto-trigger hedge sim.")
+    ap.add_argument("--start", default="2026-02-28")
+    ap.add_argument("--end", default="2026-05-16")
+    ap.add_argument("--spread", type=int, default=30,
+                    help="Sim spread in points (default 30 per 2026-05-16 user preference).")
     ap.add_argument("--balance", type=float, default=None,
                     help="Live account balance for scaling. Default = auto-detect via MT5.")
     ap.add_argument("--prev-wfo", default="output/wfo_orb_may9",
@@ -270,6 +300,50 @@ def main() -> int:
                 "consecutive_red_weeks": 2,
             },
         }
+
+        # v3 enrichment: preserve hand-crafted hedge fields if this is a v3 setfile.
+        # Parent-only sim below produces accurate parent NP; hedge fields (combined
+        # NP, per-stream contribution, comparison_vs_v2_1) must come from a
+        # hedge WFO run (sim_wfo_hedge_reverse.py portfolio compare) and are
+        # MERGED here so re-running this script doesn't blow them away.
+        if is_v3_setfile(cfg):
+            proj["ea"] = "DT818_pro_v3.mq5"
+            proj["ea_version"] = "v3 reverse-hedge, risk-equalized lots"
+            # Always refresh per-stream hedge cfg from setfile (source of truth)
+            proj["per_stream_hedge_cfg"] = {h["stream"]: {
+                "tp_mult": h["tp_mult"], "sl_mult": h["sl_mult"],
+                "r_ratio": round(h["r_ratio"], 2),
+            } for h in extract_hedge_cfgs(cfg)}
+            # Preserve hedge-sim outputs from prior hand-craft / hedge WFO run
+            if PROJECTION_PATH.exists():
+                try:
+                    existing = json.loads(PROJECTION_PATH.read_text())
+                    for key in ("per_stream_sim_contribution_77d_149k", "raw_sim_77d",
+                                "comparison_vs_v2_1"):
+                        if key in existing:
+                            proj[key] = existing[key]
+                    # If hedge contribution fields exist in existing weekly_live,
+                    # preserve and re-scale them by the new mult.
+                    ex_wkly = existing.get("weekly_live", {})
+                    if "hedge_contribution_mean_np" in ex_wkly:
+                        # Scale to current balance
+                        ex_base = float(existing.get("baseline_balance", balance))
+                        scale_ratio = balance / ex_base if ex_base > 0 else 1.0
+                        for fld in ("hedge_contribution_mean_np", "parent_contribution_mean_np"):
+                            if fld in ex_wkly:
+                                proj["weekly_live"][fld] = ex_wkly[fld] * scale_ratio
+                        if "hedge_share_pct" in ex_wkly:
+                            proj["weekly_live"]["hedge_share_pct"] = ex_wkly["hedge_share_pct"]
+                        for fld in ("hedge_contribution_mean", "parent_contribution_mean"):
+                            if fld in existing.get("daily_live", {}):
+                                proj["daily_live"][fld] = existing["daily_live"][fld] * scale_ratio
+                    # Preserve v3-specific notes if present
+                    if "notes" in existing and any("v3" in n.lower() or "hedge" in n.lower()
+                                                    for n in existing.get("notes", [])):
+                        proj["notes"] = existing["notes"]
+                    print(f"  v3 mode: preserved hand-crafted hedge fields from existing projection")
+                except Exception as e:
+                    print(f"  [warn] could not merge existing v3 fields: {type(e).__name__}: {e}")
 
         PROJECTION_PATH.parent.mkdir(parents=True, exist_ok=True)
         PROJECTION_PATH.write_text(json.dumps(proj, indent=2))

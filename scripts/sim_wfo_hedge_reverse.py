@@ -43,7 +43,7 @@ sys.path.insert(0, str(ROOT / "scripts"))
 from zgb_sim.tick_loader import symbol_meta, kill_mt5_terminal, load_ticks, load_bars
 from zgb_sim.scalper_v1 import SymbolMeta
 from zgb_sim.orb_fast import simulate_fast as orb_simulate
-from zgb_sim.wfo_helpers import (WINDOWS_MAY9, WINDOWS_MAY16, rank_with_p0,
+from zgb_sim.wfo_helpers import (WINDOWS_MAY9, WINDOWS_MAY16, WINDOWS_MAY23, rank_with_p0,
                                   print_phase_d_with_p0, select_winner_with_p0,
                                   check_winner_boundaries, print_boundary_check, to_utc)
 from zgb_sim.regime import (
@@ -58,11 +58,15 @@ from sim_wfo_hedge_retry import (STREAM_CFGS, make_stream_cfg,
                                   PARENT_RISK_SWEEP, PARENT_RISK_PROD)
 
 
-# ==== Grid (per spec 2026-05-14) ====
-TP_MULTS = [0.5, 0.75, 1.0, 1.25, 1.5]        # 5 (per-stream)
-EXPIRES_MIN = [240, 480, 720, 1440]            # 4 (global)
-F1_CUTOFFS_SEC = [0, 1800, 3600, 7200]         # 4 (global): 0=off, 30/60/120 min cap
-REGIME_GATES = ["off", "TIGHT_NORMAL", "TIGHT_only"]  # 3 (global)
+# ==== Grid (2026-05-16 round 2: globals fixed at round-1 winners, sweep only per-stream) ====
+TP_MULTS = [3.0, 3.25, 3.5, 3.75, 4.0, 4.25, 4.5, 4.75, 5.0,
+            5.25, 5.5, 5.75, 6.0, 6.25, 6.5, 6.75, 7.0, 7.25,
+            7.5, 7.75, 8.0, 8.25, 8.5, 8.75, 9.0]              # 25 — 2026-05-17: finer step 0.25, range 3.0-9.0 (interior of prior winners 5-8.5)
+SL_MULTS = [1.0, 1.1, 1.2, 1.3, 1.4, 1.5]                        # 6  — 2026-05-17 round 7: finer step 0.1 over 1.0-1.5 range
+BUFFER_PTS_LIST = [0]                                            # 1  — 2026-05-17 round 7: R6 picked 0 for 6/6 streams; dropped
+EXPIRES_MIN = [240]                             # 1 (global) — fixed at round-1 winner
+F1_CUTOFFS_SEC = [1800]                         # 1 (global) — fixed at round-1 winner
+REGIME_GATES = ["off"]                          # 1 (global) — set to "off" 2026-05-16 to match EA (EA has no regime classifier)
 
 
 @dataclass(frozen=True)
@@ -70,7 +74,9 @@ class ReverseHedgeCfg:
     exp_min: int            # expire_minutes
     f1_sec: int             # F1 filter (0 = disabled)
     regime_gate: str        # "off" | "TIGHT_NORMAL" | "TIGHT_only"
-    tp_mult: float          # mirrored TP distance multiplier on sl_dist
+    tp_mult: float          # mirrored TP distance multiplier on parent sl_dist
+    sl_mult: float          # hedge SL distance multiplier on parent sl_dist
+    buffer_pts: int         # hedge LIMIT offset past parent entry (deeper retrace required)
 
 
 @dataclass(frozen=True)
@@ -164,15 +170,21 @@ def simulate_reverse_hedges(sl_events, ticks_arr, stream_cfg: dict,
     ts_arr = ticks_arr["ts_ns"]; bid = ticks_arr["bid"]; ask = ticks_arr["ask"]
     expire_ns = int(hcfg.exp_min * 60 * 1_000_000_000)
     walk_max_ns = int(3 * 24 * 3600 * 1_000_000_000)
-    sl_dist_price = stream_cfg["fixed_sl_pts"] * POINT
-    tp_dist_price = sl_dist_price * hcfg.tp_mult
+    parent_sl_dist = stream_cfg["fixed_sl_pts"] * POINT
+    sl_dist_price = parent_sl_dist * hcfg.sl_mult     # hedge SL distance
+    tp_dist_price = parent_sl_dist * hcfg.tp_mult     # hedge TP distance (still relative to parent SL)
     out = []
 
     for ev in sl_events:
         sl_ts = ev["ts_ns"]
         direction = ev["direction"]
         entry_price = ev["entry_price"]
-        lots = ev["lots"]
+        # Risk-equalization: scale hedge lots so dollar-loss-on-SL = parent dollar-risk
+        # regardless of sl_mult. Math:
+        #   parent_risk_$ = parent_sl_dist * parent_lots * CONTRACT
+        #   hedge_risk_$ = (sl_mult * parent_sl_dist) * hedge_lots * CONTRACT
+        #   Equating -> hedge_lots = parent_lots / sl_mult
+        lots = ev["lots"] / hcfg.sl_mult
 
         # F1 filter
         if hcfg.f1_sec > 0:
@@ -187,17 +199,20 @@ def simulate_reverse_hedges(sl_events, ticks_arr, stream_cfg: dict,
             if not regime_allowed(regime, hcfg.regime_gate):
                 continue
 
-        # Reverse hedge geometry (mirrored)
-        if direction == 1:    # parent BUY → reverse SELL_LIMIT at entry
+        # Reverse hedge geometry (mirrored).
+        # buffer_pts pushes the LIMIT past parent entry — requires deeper retrace
+        # past parent SL before the hedge can fill (selects for stronger reversals).
+        buffer_price = hcfg.buffer_pts * POINT
+        if direction == 1:    # parent BUY SL'd (price below entry) → SELL_LIMIT above entry
             hedge_dir = -1
-            hedge_entry = entry_price
-            hedge_sl = entry_price + sl_dist_price       # above (SELL SL)
-            hedge_tp = entry_price - tp_dist_price       # below (SELL TP)
-        else:                  # parent SELL → reverse BUY_LIMIT at entry
+            hedge_entry = entry_price + buffer_price
+            hedge_sl = hedge_entry + sl_dist_price       # above (SELL SL)
+            hedge_tp = hedge_entry - tp_dist_price       # below (SELL TP)
+        else:                  # parent SELL SL'd (price above entry) → BUY_LIMIT below entry
             hedge_dir = 1
-            hedge_entry = entry_price
-            hedge_sl = entry_price - sl_dist_price       # below (BUY SL)
-            hedge_tp = entry_price + tp_dist_price       # above (BUY TP)
+            hedge_entry = entry_price - buffer_price
+            hedge_sl = hedge_entry - sl_dist_price       # below (BUY SL)
+            hedge_tp = hedge_entry + tp_dist_price       # above (BUY TP)
 
         # Pending lifecycle: from sl_ts to sl_ts + expire_ns
         i0 = np.searchsorted(ts_arr, sl_ts)
@@ -247,19 +262,20 @@ def simulate_reverse_hedges(sl_events, ticks_arr, stream_cfg: dict,
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--windows", default="may9", choices=["may9", "may16"],
-                    help="WFO window set (may9 for retro validation, may16 for Sat reopt)")
+    ap.add_argument("--windows", default="may9", choices=["may9", "may16", "may23"],
+                    help="WFO window set (may9/may16 = retro; may23 = Sat 2026-05-23 reopt)")
     args = ap.parse_args()
-    WINDOWS = WINDOWS_MAY9 if args.windows == "may9" else WINDOWS_MAY16
+    WINDOWS = {"may9": WINDOWS_MAY9, "may16": WINDOWS_MAY16, "may23": WINDOWS_MAY23}[args.windows]
     win_tag = args.windows
 
     n_globals = len(EXPIRES_MIN) * len(F1_CUTOFFS_SEC) * len(REGIME_GATES)
+    n_per_stream = len(TP_MULTS) * len(SL_MULTS) * len(BUFFER_PTS_LIST)
     print("=" * 110)
-    print(f"  REVERSE-HEDGE WFO (global exp_min/f1_sec/regime_gate, per-stream tp_mult)")
+    print(f"  REVERSE-HEDGE WFO (global exp_min/f1_sec/regime_gate, per-stream tp_mult/sl_mult/buffer_pts)")
     print(f"  Windows: {win_tag.upper()} ({len(WINDOWS)} folds, IS+OOS each)")
-    print(f"  Grid: tp_mult({len(TP_MULTS)}) per-stream  ×  "
+    print(f"  Grid: tp({len(TP_MULTS)}) × sl({len(SL_MULTS)}) × buf({len(BUFFER_PTS_LIST)}) per-stream  ×  "
           f"exp({len(EXPIRES_MIN)}) × f1({len(F1_CUTOFFS_SEC)}) × gate({len(REGIME_GATES)}) global")
-    print(f"  Globals = {n_globals}.  Per-stream sims per window = {n_globals*len(TP_MULTS)*6}")
+    print(f"  Globals = {n_globals}.  Per-stream sims per window = {n_globals*n_per_stream*6}")
     print("=" * 110)
 
     try:
@@ -309,40 +325,45 @@ def main() -> int:
                         for f1 in F1_CUTOFFS_SEC:
                             for gate in REGIME_GATES:
                                 for tp_mult in TP_MULTS:
-                                    hcfg = ReverseHedgeCfg(
-                                        exp_min=exp_min, f1_sec=f1,
-                                        regime_gate=gate, tp_mult=tp_mult,
-                                    )
-                                    h_deals = simulate_reverse_hedges(
-                                        sl_ev, t_arr, STREAM_CFGS[stream],
-                                        hcfg, regime_map,
-                                    )
-                                    results[label][stream][(exp_min, f1, gate, tp_mult)] = h_deals
+                                    for sl_mult in SL_MULTS:
+                                        for buf in BUFFER_PTS_LIST:
+                                            hcfg = ReverseHedgeCfg(
+                                                exp_min=exp_min, f1_sec=f1,
+                                                regime_gate=gate, tp_mult=tp_mult,
+                                                sl_mult=sl_mult, buffer_pts=buf,
+                                            )
+                                            h_deals = simulate_reverse_hedges(
+                                                sl_ev, t_arr, STREAM_CFGS[stream],
+                                                hcfg, regime_map,
+                                            )
+                                            results[label][stream][(exp_min, f1, gate, tp_mult, sl_mult, buf)] = h_deals
                 print(f"  {label} {tag} {s.date()}->{e.date()} done streams={len(all_streams)}  "
                       f"[{time.time()-t_start:.0f}s]")
 
-        # For each global candidate, pick per-stream best tp_mult by IS NP sum.
-        print("\n  Choosing per-stream tp_mult for each global (exp, f1, gate)...")
+        # For each global candidate, pick per-stream best (tp_mult, sl_mult, buffer_pts) jointly by IS NP sum.
+        print("\n  Choosing per-stream (tp_mult, sl_mult, buffer_pts) for each global (exp, f1, gate)...")
         global_combos = [(e, f, g) for e in EXPIRES_MIN
                          for f in F1_CUTOFFS_SEC
                          for g in REGIME_GATES]
-        per_global_tp = {}
+        per_global_tpsl = {}
         for (exp_min, f1, gate) in global_combos:
-            tp_choice = {}
+            tpsl_choice = {}
             for stream in all_streams:
-                best_tp = None; best_total_np = -1e18
+                best_tpsl = None; best_total_np = -1e18
                 for tp_mult in TP_MULTS:
-                    total_np = 0.0
-                    for label, *_ in WINDOWS:
-                        base_deals = is_baselines[label][stream]
-                        h_deals = is_results[label][stream][(exp_min, f1, gate, tp_mult)]
-                        np_, _, _ = aggregate(base_deals + h_deals)
-                        total_np += np_
-                    if total_np > best_total_np:
-                        best_total_np = total_np
-                        best_tp = tp_mult
-                tp_choice[stream] = best_tp
-            per_global_tp[(exp_min, f1, gate)] = tp_choice
+                    for sl_mult in SL_MULTS:
+                        for buf in BUFFER_PTS_LIST:
+                            total_np = 0.0
+                            for label, *_ in WINDOWS:
+                                base_deals = is_baselines[label][stream]
+                                h_deals = is_results[label][stream][(exp_min, f1, gate, tp_mult, sl_mult, buf)]
+                                np_, _, _ = aggregate(base_deals + h_deals)
+                                total_np += np_
+                            if total_np > best_total_np:
+                                best_total_np = total_np
+                                best_tpsl = (tp_mult, sl_mult, buf)
+                tpsl_choice[stream] = best_tpsl
+            per_global_tpsl[(exp_min, f1, gate)] = tpsl_choice
 
         # Build per-window portfolio NP/DD using selected tp_mults, ready for rank_with_p0.
         grid_for_rank = [GlobalCfg(exp_min=e, f1_sec=f, regime_gate=g)
@@ -350,15 +371,15 @@ def main() -> int:
         rows_is = {label: [] for label, *_ in WINDOWS}
         rows_oos = {label: [] for label, *_ in WINDOWS}
         for (exp_min, f1, gate) in global_combos:
-            tp_choice = per_global_tp[(exp_min, f1, gate)]
+            tpsl_choice = per_global_tpsl[(exp_min, f1, gate)]
             for label, *_ in WINDOWS:
                 p_is = []; p_oos = []
                 for stream in all_streams:
-                    tp = tp_choice[stream]
+                    tp, sl, buf = tpsl_choice[stream]
                     p_is.extend(is_baselines[label][stream])
-                    p_is.extend(is_results[label][stream][(exp_min, f1, gate, tp)])
+                    p_is.extend(is_results[label][stream][(exp_min, f1, gate, tp, sl, buf)])
                     p_oos.extend(oos_baselines[label][stream])
-                    p_oos.extend(oos_results[label][stream][(exp_min, f1, gate, tp)])
+                    p_oos.extend(oos_results[label][stream][(exp_min, f1, gate, tp, sl, buf)])
                 np_is, dd_is, pf_is = aggregate(p_is)
                 np_oos, dd_oos, pf_oos = aggregate(p_oos)
                 rows_is[label].append({"exp_min": exp_min, "f1_sec": f1, "regime_gate": gate,
@@ -378,18 +399,21 @@ def main() -> int:
         print_boundary_check(flagged)
 
         w_exp = winner["cfg"].exp_min; w_f1 = winner["cfg"].f1_sec; w_gate = winner["cfg"].regime_gate
-        w_tp = per_global_tp[(w_exp, w_f1, w_gate)]
+        w_tpsl = per_global_tpsl[(w_exp, w_f1, w_gate)]
         print(f"\n  WINNER: exp_min={w_exp}  f1_sec={w_f1}  regime_gate={w_gate}")
-        print(f"  Per-stream tp_mult:")
+        print(f"  Per-stream (tp_mult, sl_mult, buffer_pts):")
         for s in all_streams:
-            print(f"    {s}: tp_mult={w_tp[s]}")
+            tp, sl, buf = w_tpsl[s]
+            print(f"    {s}: tp_mult={tp}  sl_mult={sl}  buffer_pts={buf}")
 
         out_dir = ROOT / "output" / f"wfo_hedge_reverse_{win_tag}"
         out_dir.mkdir(parents=True, exist_ok=True)
         wj = {"expire_minutes": int(w_exp),
               "max_seconds_after_entry": int(w_f1),
               "regime_gate": w_gate,
-              "per_stream_tp_mult": {s: float(w_tp[s]) for s in all_streams}}
+              "per_stream_tp_mult": {s: float(w_tpsl[s][0]) for s in all_streams},
+              "per_stream_sl_mult": {s: float(w_tpsl[s][1]) for s in all_streams},
+              "per_stream_buffer_pts": {s: int(w_tpsl[s][2]) for s in all_streams}}
         (out_dir / "winner.json").write_text(json.dumps(wj, indent=2))
         print(f"  Persisted: {out_dir / 'winner.json'}")
 
@@ -408,8 +432,9 @@ def main() -> int:
             base_deals, sl_ev = run_baseline_window(
                 stream, ticks_full, m1_full, m5_full, meta, PARENT_RISK_PROD
             )
-            tp = w_tp[stream]
-            hcfg = ReverseHedgeCfg(exp_min=w_exp, f1_sec=w_f1, regime_gate=w_gate, tp_mult=tp)
+            tp, sl, buf = w_tpsl[stream]
+            hcfg = ReverseHedgeCfg(exp_min=w_exp, f1_sec=w_f1, regime_gate=w_gate,
+                                    tp_mult=tp, sl_mult=sl, buffer_pts=buf)
             h_deals = simulate_reverse_hedges(sl_ev, t_arr_full,
                                                 STREAM_CFGS[stream], hcfg, regime_map_full)
             all_base.extend(base_deals)
@@ -422,6 +447,8 @@ def main() -> int:
                 "hedge_n": len(h_deals),
                 "hedge_wr": wr,
                 "tp_mult": tp,
+                "sl_mult": sl,
+                "buffer_pts": buf,
             }
         np_b, dd_b, pf_b = aggregate(all_base)
         ndd_b = (np_b / (dd_b/100 * (DEPOSIT + np_b))) if dd_b > 0 else 0
@@ -436,11 +463,12 @@ def main() -> int:
 
         print(f"\n  Per-stream reverse-hedge contribution "
               f"(global exp={w_exp} f1={w_f1} gate={w_gate}):")
-        print(f"  {'Stream':<6}  {'tp_mult':<7} {'parent_NP':>10} {'parent_n':>8} "
+        print(f"  {'Stream':<6}  {'tp':<5} {'sl':<5} {'buf':<5} {'parent_NP':>10} {'parent_n':>8} "
               f"{'rev_NP':>10} {'rev_n':>6} {'rev_W':>6}")
         for s in all_streams:
             ps = per_stream_summary[s]
-            print(f"  {s:<6}  {ps['tp_mult']:<7} ${ps['parent_np']:>+8,.0f} {ps['parent_n']:>8} "
+            print(f"  {s:<6}  {ps['tp_mult']:<5} {ps['sl_mult']:<5} {ps['buffer_pts']:<5} "
+                  f"${ps['parent_np']:>+8,.0f} {ps['parent_n']:>8} "
                   f"${ps['hedge_np']:>+8,.0f} {ps['hedge_n']:>6} {ps['hedge_wr']:>5.0f}%")
 
     finally:
