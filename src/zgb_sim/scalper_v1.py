@@ -80,6 +80,9 @@ class Position:
     sl: float
     tp: float
     lots: float
+    sl_trail_hwm: float = 0.0   # V1 fractal-trail: cached high-water-mark for trailed SL.
+                                 # BUY: highest confirmed down-fractal seen so far (0.0 = uninit).
+                                 # SELL: lowest confirmed up-fractal seen so far (0.0 = uninit).
 
 
 @dataclass

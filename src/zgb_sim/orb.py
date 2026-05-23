@@ -409,6 +409,32 @@ def simulate(
 
         # (OCO removed — both BuyStop and SellStop allowed to fire on same session.)
 
+        # V1 trail: ratchet SL to most recent confirmed opposite-side fractal.
+        # Cache the trail HWM on the Position so we only update when a NEW
+        # fractal beats it (avoids redundant SL assignments on unchanged data).
+        if cfg.fractal_trail and fractal_cache is not None:
+            for sid, plist in position_session.items():
+                for pos in plist:
+                    if pos.direction == 1:
+                        # BUY: trail to highest confirmed down-fractal seen so far
+                        mask = fractal_cache["dn_ts"] <= ts_ns
+                        if mask.any():
+                            best = float(fractal_cache["dn_price"][mask].max())
+                            if best > pos.sl_trail_hwm:
+                                pos.sl_trail_hwm = best
+                                if best > pos.sl:
+                                    pos.sl = _norm_price(best, meta)
+                    else:
+                        # SELL: trail to lowest confirmed up-fractal seen so far
+                        mask = fractal_cache["up_ts"] <= ts_ns
+                        if mask.any():
+                            best = float(fractal_cache["up_price"][mask].min())
+                            # For SELL, hwm tracks the LOWEST up-fractal (use inf sentinel)
+                            if pos.sl_trail_hwm == 0.0 or best < pos.sl_trail_hwm:
+                                pos.sl_trail_hwm = best
+                                if best < pos.sl:
+                                    pos.sl = _norm_price(best, meta)
+
         # 4) SL/TP on existing positions (not just-filled)
         survivors = []
         for sid_list_pair in list(position_session.items()):
