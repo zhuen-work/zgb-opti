@@ -399,6 +399,12 @@ def simulate(
                 triggered = True; fill = p.price; direction = -1
             if triggered:
                 pos = Position(direction, fill, p.sl, p.tp, p.lots)
+                pos.entry_ts_ns = ts_ns
+                # V1: skip past all fractals confirmed at or before entry — they
+                # belong to the pre-entry context and must not influence trail SL.
+                if cfg.fractal_trail and fractal_cache is not None:
+                    pos.sl_trail_idx_dn = int(np.searchsorted(fractal_cache["dn_ts"], ts_ns, side='right'))
+                    pos.sl_trail_idx_up = int(np.searchsorted(fractal_cache["up_ts"], ts_ns, side='right'))
                 new_positions.append((p.oid, pos))
                 deals.append(Deal(ts, 'entry', direction, p.lots, fill, 0.0))
                 diag_orders_filled += 1

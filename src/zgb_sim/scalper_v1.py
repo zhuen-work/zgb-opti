@@ -85,6 +85,7 @@ class Position:
                                  # SELL: lowest confirmed up-fractal seen so far (0.0 = uninit).
     sl_trail_idx_dn: int = 0  # V1 cache: how far into fractal_cache["dn_ts"] we've already scanned
     sl_trail_idx_up: int = 0  # V1 cache: same for up-fractals (SELL trail)
+    entry_ts_ns: int = 0      # V1: timestamp of fill (ns); trail indices advanced past this at fill
 
 
 @dataclass

@@ -492,10 +492,18 @@ def _run_sim(
                         pos_orig_sl_dist[slot] = new_pos_entry[j] - new_pos_sl[j]
                     else:
                         pos_orig_sl_dist[slot] = new_pos_sl[j] - new_pos_entry[j]
-                    # V1 fractal-trail: initialize per-position state
+                    # V1 fractal-trail: initialize per-position state.
+                    # Advance indices past all fractals confirmed at or before entry so
+                    # pre-entry fractals never influence trail SL (CRITICAL bug fix).
                     pos_sl_trail_hwm[slot] = 0.0
-                    pos_sl_trail_idx_dn[slot] = np.int64(0)
-                    pos_sl_trail_idx_up[slot] = np.int64(0)
+                    if v1:
+                        lo_dn = np.searchsorted(f_dn_ts, ts_ns, side='right')
+                        lo_up = np.searchsorted(f_up_ts, ts_ns, side='right')
+                        pos_sl_trail_idx_dn[slot] = np.int64(lo_dn)
+                        pos_sl_trail_idx_up[slot] = np.int64(lo_up)
+                    else:
+                        pos_sl_trail_idx_dn[slot] = np.int64(0)
+                        pos_sl_trail_idx_up[slot] = np.int64(0)
                     break
 
     return deal_count, balance, dd_abs, balance_max
