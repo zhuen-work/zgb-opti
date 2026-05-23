@@ -368,11 +368,28 @@ def simulate(
                     if not pending_session[sid]:
                         pending_session.pop(sid)
 
-        # 3) Pending fills
+        # 3) Pending fills (with optional V2 fractal-confirm gate)
         new_positions = []
         still_pending = []
         filled_session_ids = set()
         for p in pending:
+            # V2 gate: pending arms only after a same-side fractal confirms past entry price
+            if cfg.fractal_confirm and fractal_cache is not None:
+                placed_ns = pd.Timestamp(p.placed_ts).value  # placed_ts is already naive UTC Timestamp
+                if p.kind == ORDER_BUY_STOP:
+                    up_mask = ((fractal_cache["up_ts"] > placed_ns) &
+                               (fractal_cache["up_ts"] <= ts_ns) &
+                               (fractal_cache["up_price"] > p.price))
+                    if not up_mask.any():
+                        still_pending.append(p)
+                        continue
+                else:  # SELL_STOP
+                    dn_mask = ((fractal_cache["dn_ts"] > placed_ns) &
+                               (fractal_cache["dn_ts"] <= ts_ns) &
+                               (fractal_cache["dn_price"] < p.price))
+                    if not dn_mask.any():
+                        still_pending.append(p)
+                        continue
             triggered = False
             if p.kind == ORDER_BUY_STOP and ask >= p.price:
                 triggered = True; fill = p.price; direction = 1
