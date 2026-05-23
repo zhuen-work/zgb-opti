@@ -62,7 +62,8 @@ def _pnl(direction, entry, close_price, lots, tick_value, tick_size):
 @njit(cache=True, fastmath=False)
 def _add_pending(pend_kind, pend_price, pend_sl, pend_tp, pend_lots,
                  pend_expire, pend_active, pend_session,
-                 kind_val, price, sl, tp, lots, expire_ns, session_id):
+                 pend_placed_ns, pend_armed,
+                 kind_val, price, sl, tp, lots, expire_ns, session_id, placed_ns):
     for i in range(len(pend_active)):
         if not pend_active[i]:
             pend_kind[i] = kind_val
@@ -72,6 +73,8 @@ def _add_pending(pend_kind, pend_price, pend_sl, pend_tp, pend_lots,
             pend_lots[i] = lots
             pend_expire[i] = expire_ns
             pend_session[i] = session_id
+            pend_placed_ns[i] = placed_ns
+            pend_armed[i] = False
             pend_active[i] = True
             return True
     return False
@@ -106,6 +109,10 @@ def _run_sim(
     volume_min, volume_max, volume_step, digits,
     be_trigger_r, be_buffer_pts,
     deal_ts, deal_kind, deal_dir, deal_lots, deal_price, deal_pnl,
+    sess_skip,                      # bool[n_sessions]: V3 — skip firing for this session
+    f_up_ts, f_up_pr,               # int64[k], float64[k]: up-fractals (sorted asc by ts)
+    f_dn_ts, f_dn_pr,               # int64[k], float64[k]: dn-fractals (sorted asc by ts)
+    v1, v2, v3,                     # bool flags
 ):
     """JIT ORB sim. sess_* arrays pre-built; iterate ticks, fire on session end."""
     pend_kind = np.zeros(MAX_PENDING, dtype=np.int8)
@@ -116,6 +123,8 @@ def _run_sim(
     pend_expire = np.zeros(MAX_PENDING, dtype=np.int64)
     pend_session = np.full(MAX_PENDING, -1, dtype=np.int32)
     pend_active = np.zeros(MAX_PENDING, dtype=np.bool_)
+    pend_placed_ns = np.zeros(MAX_PENDING, dtype=np.int64)
+    pend_armed = np.zeros(MAX_PENDING, dtype=np.bool_)
 
     pos_dir = np.zeros(MAX_POSITIONS, dtype=np.int8)
     pos_entry = np.zeros(MAX_POSITIONS, dtype=np.float64)
@@ -126,6 +135,10 @@ def _run_sim(
     pos_active = np.zeros(MAX_POSITIONS, dtype=np.bool_)
     pos_be_done = np.zeros(MAX_POSITIONS, dtype=np.bool_)
     pos_orig_sl_dist = np.zeros(MAX_POSITIONS, dtype=np.float64)  # for BE trigger price calc
+    # V1 fractal-trail state
+    pos_sl_trail_hwm = np.zeros(MAX_POSITIONS, dtype=np.float64)
+    pos_sl_trail_idx_dn = np.zeros(MAX_POSITIONS, dtype=np.int64)
+    pos_sl_trail_idx_up = np.zeros(MAX_POSITIONS, dtype=np.int64)
 
     n_sess = sess_range_end_ns.shape[0]
     sess_fired = np.zeros(n_sess, dtype=np.bool_)
@@ -211,6 +224,10 @@ def _run_sim(
                 continue
             sess_fired[sid] = True
 
+            # V3: skip sessions flagged during Python precompute
+            if v3 and sess_skip[sid]:
+                continue
+
             rh = sess_range_high[sid]
             rl = sess_range_low[sid]
             if rh <= 0 or rl <= 0:
@@ -248,14 +265,17 @@ def _run_sim(
                     tp_half = _norm_price(buy_entry + tp_dist_pts * htp_ratio * point, tick_size, digits)
                     _add_pending(pend_kind, pend_price, pend_sl, pend_tp,
                                  pend_lots, pend_expire, pend_active, pend_session,
-                                 K_BUY_STOP, buy_entry, sl, tp_half, half_lots, expire_ns, sid)
+                                 pend_placed_ns, pend_armed,
+                                 K_BUY_STOP, buy_entry, sl, tp_half, half_lots, expire_ns, sid, ts_ns)
                     _add_pending(pend_kind, pend_price, pend_sl, pend_tp,
                                  pend_lots, pend_expire, pend_active, pend_session,
-                                 K_BUY_STOP, buy_entry, sl, tp, half_lots, expire_ns, sid)
+                                 pend_placed_ns, pend_armed,
+                                 K_BUY_STOP, buy_entry, sl, tp, half_lots, expire_ns, sid, ts_ns)
                 else:
                     _add_pending(pend_kind, pend_price, pend_sl, pend_tp,
                                  pend_lots, pend_expire, pend_active, pend_session,
-                                 K_BUY_STOP, buy_entry, sl, tp, total_lots, expire_ns, sid)
+                                 pend_placed_ns, pend_armed,
+                                 K_BUY_STOP, buy_entry, sl, tp, total_lots, expire_ns, sid, ts_ns)
 
             # SellStop below range_low
             sell_entry = _norm_price(rl - buffer_pts * point, tick_size, digits)
@@ -269,14 +289,17 @@ def _run_sim(
                     tp_half = _norm_price(sell_entry - tp_dist_pts * htp_ratio * point, tick_size, digits)
                     _add_pending(pend_kind, pend_price, pend_sl, pend_tp,
                                  pend_lots, pend_expire, pend_active, pend_session,
-                                 K_SELL_STOP, sell_entry, sl, tp_half, half_lots, expire_ns, sid)
+                                 pend_placed_ns, pend_armed,
+                                 K_SELL_STOP, sell_entry, sl, tp_half, half_lots, expire_ns, sid, ts_ns)
                     _add_pending(pend_kind, pend_price, pend_sl, pend_tp,
                                  pend_lots, pend_expire, pend_active, pend_session,
-                                 K_SELL_STOP, sell_entry, sl, tp, half_lots, expire_ns, sid)
+                                 pend_placed_ns, pend_armed,
+                                 K_SELL_STOP, sell_entry, sl, tp, half_lots, expire_ns, sid, ts_ns)
                 else:
                     _add_pending(pend_kind, pend_price, pend_sl, pend_tp,
                                  pend_lots, pend_expire, pend_active, pend_session,
-                                 K_SELL_STOP, sell_entry, sl, tp, total_lots, expire_ns, sid)
+                                 pend_placed_ns, pend_armed,
+                                 K_SELL_STOP, sell_entry, sl, tp, total_lots, expire_ns, sid, ts_ns)
 
         # Expire pending past expire
         for i in range(MAX_PENDING):
@@ -297,6 +320,26 @@ def _run_sim(
         for i in range(MAX_PENDING):
             if not pend_active[i]:
                 continue
+
+            # V2 gate: pending arms only after a same-side fractal confirms past entry price.
+            # Once armed, skip re-scan (confirmation is monotonic).
+            if v2 and not pend_armed[i]:
+                placed_ns_i = pend_placed_ns[i]
+                found = False
+                if pend_kind[i] == K_BUY_STOP:
+                    for fi in range(len(f_up_ts)):
+                        if f_up_ts[fi] > placed_ns_i and f_up_ts[fi] <= ts_ns and f_up_pr[fi] > pend_price[i]:
+                            found = True
+                            break
+                else:
+                    for fi in range(len(f_dn_ts)):
+                        if f_dn_ts[fi] > placed_ns_i and f_dn_ts[fi] <= ts_ns and f_dn_pr[fi] < pend_price[i]:
+                            found = True
+                            break
+                if not found:
+                    continue  # gate not satisfied; skip trigger check this tick
+                pend_armed[i] = True  # gate satisfied — never re-scan
+
             triggered = False
             direction = 0
             fill = 0.0
@@ -344,6 +387,33 @@ def _run_sim(
                         pos_sl[i] = _norm_price(pos_entry[i] - be_buffer_pts * point,
                                                 tick_size, digits)
                         pos_be_done[i] = True
+
+        # V1 fractal-trail: ratchet SL to most recent opposite-side fractal
+        # (runs on EXISTING positions before SL/TP check, matching slow path order)
+        if v1:
+            for i in range(MAX_POSITIONS):
+                if not pos_active[i]:
+                    continue
+                if pos_dir[i] == 1:
+                    # BUY: trail to highest dn-fractal confirmed so far
+                    upper = pos_sl_trail_idx_dn[i]
+                    while upper < len(f_dn_ts) and f_dn_ts[upper] <= ts_ns:
+                        if f_dn_pr[upper] > pos_sl_trail_hwm[i]:
+                            pos_sl_trail_hwm[i] = f_dn_pr[upper]
+                        upper += 1
+                    pos_sl_trail_idx_dn[i] = upper
+                    if pos_sl_trail_hwm[i] > pos_sl[i]:
+                        pos_sl[i] = _norm_price(pos_sl_trail_hwm[i], tick_size, digits)
+                else:
+                    # SELL: trail to lowest up-fractal confirmed so far
+                    upper = pos_sl_trail_idx_up[i]
+                    while upper < len(f_up_ts) and f_up_ts[upper] <= ts_ns:
+                        if pos_sl_trail_hwm[i] == 0.0 or f_up_pr[upper] < pos_sl_trail_hwm[i]:
+                            pos_sl_trail_hwm[i] = f_up_pr[upper]
+                        upper += 1
+                    pos_sl_trail_idx_up[i] = upper
+                    if pos_sl_trail_hwm[i] > 0.0 and pos_sl_trail_hwm[i] < pos_sl[i]:
+                        pos_sl[i] = _norm_price(pos_sl_trail_hwm[i], tick_size, digits)
 
         # SL/TP on EXISTING positions
         for i in range(MAX_POSITIONS):
@@ -416,6 +486,10 @@ def _run_sim(
                         pos_orig_sl_dist[slot] = new_pos_entry[j] - new_pos_sl[j]
                     else:
                         pos_orig_sl_dist[slot] = new_pos_sl[j] - new_pos_entry[j]
+                    # V1 fractal-trail: initialize per-position state
+                    pos_sl_trail_hwm[slot] = 0.0
+                    pos_sl_trail_idx_dn[slot] = np.int64(0)
+                    pos_sl_trail_idx_up[slot] = np.int64(0)
                     break
 
     return deal_count, balance, dd_abs, balance_max
@@ -493,8 +567,17 @@ def simulate_fast(
     tick_day_idx = (tick_ts_ns // 1_000_000_000 // 86400).astype(np.int64)
 
     m5_ts_ns = _ts_to_ns(m5_bars["ts"])
-    m5_highs = m5_bars["high"].values.astype(np.float64)
-    m5_lows = m5_bars["low"].values.astype(np.float64)
+    # entry_mode="wick" (default): use bar highs/lows (wick tips).
+    # entry_mode="body":  use max(open,close)/min(open,close) per bar (body edges).
+    # The downstream range scan is unchanged — it just gets different extremes.
+    if cfg.entry_mode == "body":
+        opens = m5_bars["open"].values.astype(np.float64)
+        closes = m5_bars["close"].values.astype(np.float64)
+        m5_highs = np.maximum(opens, closes)
+        m5_lows = np.minimum(opens, closes)
+    else:
+        m5_highs = m5_bars["high"].values.astype(np.float64)
+        m5_lows = m5_bars["low"].values.astype(np.float64)
 
     if len(tick_ts_ns) == 0:
         first_day = last_day = date.today()
@@ -505,6 +588,42 @@ def simulate_fast(
     rs_ns, re_ns, ex_ns, rh_arr, rl_arr = _build_sessions_arrays(
         (first_day, last_day), cfg, m5_ts_ns, m5_highs, m5_lows,
     )
+
+    # Fractal precompute (V1/V2/V3); empty arrays if all flags off
+    v1 = bool(cfg.fractal_trail)
+    v2 = bool(cfg.fractal_confirm)
+    v3 = bool(cfg.fractal_range)
+    if v1 or v2 or v3:
+        from .fractals import confirmed_fractals
+        fc = confirmed_fractals(m5_bars, width=cfg.fractal_width)
+        f_up_ts = fc["up_ts"].astype(np.int64)
+        f_up_pr = fc["up_price"].astype(np.float64)
+        f_dn_ts = fc["dn_ts"].astype(np.int64)
+        f_dn_pr = fc["dn_price"].astype(np.float64)
+    else:
+        f_up_ts = np.empty(0, dtype=np.int64)
+        f_up_pr = np.empty(0, dtype=np.float64)
+        f_dn_ts = np.empty(0, dtype=np.int64)
+        f_dn_pr = np.empty(0, dtype=np.float64)
+
+    # V3: override per-session range from fractals; mark sessions with no qualifying fractals
+    n_sessions = len(re_ns)
+    sess_skip = np.zeros(n_sessions, dtype=np.bool_)
+    if v3:
+        if len(f_up_ts) > 0 and len(f_dn_ts) > 0:
+            for si in range(n_sessions):
+                rs_ns_si = int(rs_ns[si])
+                re_ns_si = int(re_ns[si])
+                up_in = (f_up_ts >= rs_ns_si) & (f_up_ts < re_ns_si)
+                dn_in = (f_dn_ts >= rs_ns_si) & (f_dn_ts < re_ns_si)
+                if not up_in.any() or not dn_in.any():
+                    sess_skip[si] = True
+                else:
+                    rh_arr[si] = float(f_up_pr[up_in].max())
+                    rl_arr[si] = float(f_dn_pr[dn_in].min())
+        else:
+            # V3 on but no fractals at all → skip every session
+            sess_skip[:] = True
 
     deal_ts = np.zeros(MAX_DEALS, dtype=np.int64)
     deal_kind = np.zeros(MAX_DEALS, dtype=np.int8)
@@ -527,6 +646,10 @@ def simulate_fast(
         float(meta.volume_max), float(meta.volume_step), int(meta.digits),
         float(cfg.be_trigger_r), int(cfg.be_buffer_pts),
         deal_ts, deal_kind, deal_dir, deal_lots, deal_price, deal_pnl,
+        sess_skip,
+        f_up_ts, f_up_pr,
+        f_dn_ts, f_dn_pr,
+        v1, v2, v3,
     )
 
     tp_count = sl_count = other_count = 0
