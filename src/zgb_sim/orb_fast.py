@@ -328,12 +328,16 @@ def _run_sim(
                 found = False
                 if pend_kind[i] == K_BUY_STOP:
                     for fi in range(len(f_up_ts)):
-                        if f_up_ts[fi] > placed_ns_i and f_up_ts[fi] <= ts_ns and f_up_pr[fi] > pend_price[i]:
+                        if f_up_ts[fi] > ts_ns:
+                            break  # sorted; remaining entries can't satisfy <= ts_ns
+                        if f_up_ts[fi] > placed_ns_i and f_up_pr[fi] > pend_price[i]:
                             found = True
                             break
                 else:
                     for fi in range(len(f_dn_ts)):
-                        if f_dn_ts[fi] > placed_ns_i and f_dn_ts[fi] <= ts_ns and f_dn_pr[fi] < pend_price[i]:
+                        if f_dn_ts[fi] > ts_ns:
+                            break  # sorted; remaining entries can't satisfy <= ts_ns
+                        if f_dn_ts[fi] > placed_ns_i and f_dn_pr[fi] < pend_price[i]:
                             found = True
                             break
                 if not found:
@@ -400,20 +404,22 @@ def _run_sim(
                     while upper < len(f_dn_ts) and f_dn_ts[upper] <= ts_ns:
                         if f_dn_pr[upper] > pos_sl_trail_hwm[i]:
                             pos_sl_trail_hwm[i] = f_dn_pr[upper]
+                            # Only ratchet SL when hwm just advanced (matches slow path)
+                            if pos_sl_trail_hwm[i] > pos_sl[i]:
+                                pos_sl[i] = _norm_price(pos_sl_trail_hwm[i], tick_size, digits)
                         upper += 1
                     pos_sl_trail_idx_dn[i] = upper
-                    if pos_sl_trail_hwm[i] > pos_sl[i]:
-                        pos_sl[i] = _norm_price(pos_sl_trail_hwm[i], tick_size, digits)
                 else:
                     # SELL: trail to lowest up-fractal confirmed so far
                     upper = pos_sl_trail_idx_up[i]
                     while upper < len(f_up_ts) and f_up_ts[upper] <= ts_ns:
                         if pos_sl_trail_hwm[i] == 0.0 or f_up_pr[upper] < pos_sl_trail_hwm[i]:
                             pos_sl_trail_hwm[i] = f_up_pr[upper]
+                            # Only ratchet SL when hwm just advanced (matches slow path)
+                            if pos_sl_trail_hwm[i] < pos_sl[i]:
+                                pos_sl[i] = _norm_price(pos_sl_trail_hwm[i], tick_size, digits)
                         upper += 1
                     pos_sl_trail_idx_up[i] = upper
-                    if pos_sl_trail_hwm[i] > 0.0 and pos_sl_trail_hwm[i] < pos_sl[i]:
-                        pos_sl[i] = _norm_price(pos_sl_trail_hwm[i], tick_size, digits)
 
         # SL/TP on EXISTING positions
         for i in range(MAX_POSITIONS):

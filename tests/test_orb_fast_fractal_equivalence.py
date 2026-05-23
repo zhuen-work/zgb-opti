@@ -44,5 +44,10 @@ def test_slow_fast_equivalence(flags):
                     rr_ratio=2.0, pending_expire_minutes=60, **flags)
     r_slow = simulate_slow(ticks, m5, m1, cfg, META, initial_balance=10_000.0)
     r_fast = simulate_fast(ticks, m5, m1, cfg, META, initial_balance=10_000.0)
+
+    # Sanity: baseline must produce at least 1 trade, else equivalence is vacuous
+    if not flags:  # only for the baseline case
+        assert len(r_slow.deals) > 0, "Baseline produced no trades — dataset is too quiet to validate equivalence"
+
     assert r_slow.final_balance == pytest.approx(r_fast.final_balance, abs=0.01), \
         f"slow={r_slow.final_balance:.4f} fast={r_fast.final_balance:.4f} flags={flags}"
