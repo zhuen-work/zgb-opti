@@ -83,6 +83,8 @@ class Position:
     sl_trail_hwm: float = 0.0   # V1 fractal-trail: cached high-water-mark for trailed SL.
                                  # BUY: highest confirmed down-fractal seen so far (0.0 = uninit).
                                  # SELL: lowest confirmed up-fractal seen so far (0.0 = uninit).
+    sl_trail_idx_dn: int = 0  # V1 cache: how far into fractal_cache["dn_ts"] we've already scanned
+    sl_trail_idx_up: int = 0  # V1 cache: same for up-fractals (SELL trail)
 
 
 @dataclass

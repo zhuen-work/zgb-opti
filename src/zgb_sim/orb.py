@@ -410,30 +410,40 @@ def simulate(
         # (OCO removed — both BuyStop and SellStop allowed to fire on same session.)
 
         # V1 trail: ratchet SL to most recent confirmed opposite-side fractal.
-        # Cache the trail HWM on the Position so we only update when a NEW
-        # fractal beats it (avoids redundant SL assignments on unchanged data).
+        # Per-Position index pointer advances through the sorted fractal arrays
+        # so each tick only scans newly-confirmed fractals (O(new) vs O(all)).
         if cfg.fractal_trail and fractal_cache is not None:
+            dn_ts_arr = fractal_cache["dn_ts"]
+            dn_pr_arr = fractal_cache["dn_price"]
+            up_ts_arr = fractal_cache["up_ts"]
+            up_pr_arr = fractal_cache["up_price"]
             for sid, plist in position_session.items():
                 for pos in plist:
                     if pos.direction == 1:
-                        # BUY: trail to highest confirmed down-fractal seen so far
-                        mask = fractal_cache["dn_ts"] <= ts_ns
-                        if mask.any():
-                            best = float(fractal_cache["dn_price"][mask].max())
+                        # BUY: trail to highest down-fractal confirmed by now
+                        # Find upper bound: how many dn fractals have ts <= ts_ns
+                        upper = int(np.searchsorted(dn_ts_arr, ts_ns, side='right'))
+                        if upper > pos.sl_trail_idx_dn:
+                            # New fractals confirmed since last tick
+                            new_slice = dn_pr_arr[pos.sl_trail_idx_dn:upper]
+                            best = float(new_slice.max())
                             if best > pos.sl_trail_hwm:
                                 pos.sl_trail_hwm = best
                                 if best > pos.sl:
                                     pos.sl = _norm_price(best, meta)
+                            pos.sl_trail_idx_dn = upper
                     else:
-                        # SELL: trail to lowest confirmed up-fractal seen so far
-                        mask = fractal_cache["up_ts"] <= ts_ns
-                        if mask.any():
-                            best = float(fractal_cache["up_price"][mask].min())
-                            # For SELL, hwm tracks the LOWEST up-fractal (use inf sentinel)
+                        # SELL: trail to lowest up-fractal confirmed by now
+                        upper = int(np.searchsorted(up_ts_arr, ts_ns, side='right'))
+                        if upper > pos.sl_trail_idx_up:
+                            new_slice = up_pr_arr[pos.sl_trail_idx_up:upper]
+                            best = float(new_slice.min())
+                            # Lazy init: 0.0 sentinel means "uninitialized"
                             if pos.sl_trail_hwm == 0.0 or best < pos.sl_trail_hwm:
                                 pos.sl_trail_hwm = best
                                 if best < pos.sl:
                                     pos.sl = _norm_price(best, meta)
+                            pos.sl_trail_idx_up = upper
 
         # 4) SL/TP on existing positions (not just-filled)
         survivors = []
