@@ -29,7 +29,7 @@ from .scalper_v1 import (
 class ORBConfig:
     risk_pct: float = 1.0
     range_minutes: int = 30
-    buffer_pts: int = 30
+    buffer_pts: int = 0  # 2026-05-19: was 30; aligned to EA (parent buffer removed). Sim retains the parameter so future WFO sweeps can re-test buffer>0, but the default matches current EA behavior (no buffer).
     min_range_pts: int = 200
     max_range_pts: int = 5000
     fixed_sl_pts: int = 0       # 0 = SL = range_size
@@ -54,6 +54,19 @@ class ORBConfig:
     # move SL to entry + be_buffer_pts (in entry direction). 0 = disabled.
     be_trigger_r: float = 0.0
     be_buffer_pts: int = 0
+    # Entry anchor mode: "wick" uses max(high)/min(low) across the range bars
+    # (current EA behavior — BUY_STOP at the tip of the highest wick, SELL_STOP
+    # at the tip of the lowest wick). "body" uses max(max(open,close)) /
+    # min(min(open,close)) — entries at the body extremes, ignoring wicks.
+    # Body mode triggers SOONER because body_high <= wick_high (always).
+    entry_mode: str = "wick"
+    # ----- Fractal experiments (default OFF; spec 2026-05-23) -----
+    # All three default off so existing call sites are unchanged. Each flag
+    # gates an independent mechanism in simulate() (and orb_fast.simulate_fast).
+    fractal_trail: bool = False        # V1: trail SL to most recent opposite-side fractal
+    fractal_confirm: bool = False      # V2: arm pending only after same-side fractal
+    fractal_range: bool = False        # V3: range H/L from fractals not bar extremes
+    fractal_width: int = 5             # bars each side; must be odd >=3 (3 or 5)
     comment: str = "ORB"
 
 
