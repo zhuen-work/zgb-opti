@@ -70,6 +70,7 @@ class Pending:
     expire_ts: pd.Timestamp
     oid: int = 0            # sim-side order id for debug matching
     placed_ts: pd.Timestamp = None
+    fractal_armed: bool = False  # V2: once set True, gate stops re-scanning
 
 
 @dataclass
