@@ -88,64 +88,65 @@ def main() -> int:
         ticks = load_ticks(SYMBOL, START, END, spread_pts=SPREAD)
         m1 = load_bars(SYMBOL, "M1", START, END)
         m5 = load_bars(SYMBOL, "M5", START, END)
+
+        per_stream_rows = []
+        portfolio_rows = []
+
+        for cfg_name, flags in CONFIGS:
+            merged_deals = []
+            for s in ("S1", "S2", "S3", "S4", "S5", "S6"):
+                cfg = build_cfg(s, flags)
+                r = orb_simulate(ticks, m5, m1, cfg, meta, initial_balance=DEPOSIT)
+                stream_deals = [(d.ts, s, d.pnl) for d in r.deals if d.kind != "entry"]
+                agg = aggregate(stream_deals)
+                per_stream_rows.append({
+                    "config": cfg_name, "stream": s,
+                    "np": agg["np"], "dd": agg["dd_abs"], "pf": agg["pf"],
+                    "ndd": agg["ndd"], "trades": agg["trades"], "wr": agg["wr"],
+                })
+                merged_deals.extend(stream_deals)
+
+            port = aggregate(merged_deals)
+            np_hc = port["np"] * HAIRCUT_NP
+            pf_hc = max(port["pf"] - HAIRCUT_PF, 0.0)
+            ndd_hc = np_hc / port["dd_abs"] if port["dd_abs"] > 0 else 0
+            portfolio_rows.append({
+                "config": cfg_name,
+                "np": port["np"], "np_hc": np_hc,
+                "dd_abs": port["dd_abs"], "pf": port["pf"], "pf_hc": pf_hc,
+                "ndd": port["ndd"], "ndd_hc": ndd_hc,
+                "trades": port["trades"], "wr": port["wr"],
+            })
+            print(f"  {cfg_name:<16} NP=${port['np']:>+8,.0f} (hc ${np_hc:>+8,.0f})  "
+                  f"DD=${port['dd_abs']:>7,.0f}  NP/DD$_hc={ndd_hc:>5.2f}  PF={port['pf']:.2f}  trades={port['trades']}")
+
+        per_df = pd.DataFrame(per_stream_rows)
+        port_df = pd.DataFrame(portfolio_rows)
+        per_df.to_csv(OUT_DIR / "per_stream.csv", index=False)
+
+        # Decision
+        baseline_ndd = float(port_df.loc[port_df["config"] == "baseline", "ndd_hc"].iloc[0])
+        port_df["advances_to_wfo"] = port_df["ndd_hc"] >= ADVANCE_THRESHOLD * baseline_ndd
+        port_df.to_csv(OUT_DIR / "portfolio.csv", index=False)
+
+        # Summary markdown
+        lines = [f"# ORB x Fractals Screen -- {START.date()} to {END.date()}", "",
+                 f"**Window:** {START.date()} -> {END.date()} ({(END-START).days}d)  ",
+                 f"**Spread:** {SPREAD}pt  |  **Deposit:** $10k  |  **Per-stream risk:** {PER_STREAM_RISK}%",
+                 f"**Haircut:** NP x {HAIRCUT_NP}, PF - {HAIRCUT_PF}  |  **Advance threshold:** {ADVANCE_THRESHOLD}x baseline NP/DD$_hc",
+                 "",
+                 "## Portfolio results (deal-merged, haircut applied)", "",
+                 "| Config | NP | NP_hc | DD$ | NP/DD$_hc | PF_hc | Trades | Advances? |",
+                 "|---|---|---|---|---|---|---|---|"]
+        for _, r in port_df.iterrows():
+            lines.append(f"| {r['config']} | ${r['np']:+,.0f} | ${r['np_hc']:+,.0f} | "
+                         f"${r['dd_abs']:,.0f} | {r['ndd_hc']:.2f} | {r['pf_hc']:.2f} | "
+                         f"{int(r['trades'])} | {'YES' if r['advances_to_wfo'] else 'no'} |")
+        (OUT_DIR / "summary.md").write_text("\n".join(lines), encoding="utf-8")
+        print(f"\nWrote: {OUT_DIR/'per_stream.csv'}, {OUT_DIR/'portfolio.csv'}, {OUT_DIR/'summary.md'}")
     finally:
         kill_mt5_terminal()
 
-    per_stream_rows = []
-    portfolio_rows = []
-
-    for cfg_name, flags in CONFIGS:
-        merged_deals = []
-        for s in ("S1", "S2", "S3", "S4", "S5", "S6"):
-            cfg = build_cfg(s, flags)
-            r = orb_simulate(ticks, m5, m1, cfg, meta, initial_balance=DEPOSIT)
-            stream_deals = [(d.ts, s, d.pnl) for d in r.deals if d.kind != "entry"]
-            agg = aggregate(stream_deals)
-            per_stream_rows.append({
-                "config": cfg_name, "stream": s,
-                "np": agg["np"], "dd": agg["dd_abs"], "pf": agg["pf"],
-                "ndd": agg["ndd"], "trades": agg["trades"], "wr": agg["wr"],
-            })
-            merged_deals.extend(stream_deals)
-
-        port = aggregate(merged_deals)
-        np_hc = port["np"] * HAIRCUT_NP
-        pf_hc = max(port["pf"] - HAIRCUT_PF, 0.0)
-        ndd_hc = np_hc / port["dd_abs"] if port["dd_abs"] > 0 else 0
-        portfolio_rows.append({
-            "config": cfg_name,
-            "np": port["np"], "np_hc": np_hc,
-            "dd_abs": port["dd_abs"], "pf": port["pf"], "pf_hc": pf_hc,
-            "ndd": port["ndd"], "ndd_hc": ndd_hc,
-            "trades": port["trades"], "wr": port["wr"],
-        })
-        print(f"  {cfg_name:<16} NP=${port['np']:>+8,.0f} (hc ${np_hc:>+8,.0f})  "
-              f"DD=${port['dd_abs']:>7,.0f}  NP/DD$_hc={ndd_hc:>5.2f}  PF={port['pf']:.2f}  trades={port['trades']}")
-
-    per_df = pd.DataFrame(per_stream_rows)
-    port_df = pd.DataFrame(portfolio_rows)
-    per_df.to_csv(OUT_DIR / "per_stream.csv", index=False)
-
-    # Decision
-    baseline_ndd = float(port_df.loc[port_df["config"] == "baseline", "ndd_hc"].iloc[0])
-    port_df["advances_to_wfo"] = port_df["ndd_hc"] >= ADVANCE_THRESHOLD * baseline_ndd
-    port_df.to_csv(OUT_DIR / "portfolio.csv", index=False)
-
-    # Summary markdown
-    lines = [f"# ORB x Fractals Screen -- {START.date()} to {END.date()}", "",
-             f"**Window:** {START.date()} -> {END.date()} ({(END-START).days}d)  ",
-             f"**Spread:** {SPREAD}pt  |  **Deposit:** $10k  |  **Per-stream risk:** {PER_STREAM_RISK}%",
-             f"**Haircut:** NP x {HAIRCUT_NP}, PF - {HAIRCUT_PF}  |  **Advance threshold:** {ADVANCE_THRESHOLD}x baseline NP/DD$_hc",
-             "",
-             "## Portfolio results (deal-merged, haircut applied)", "",
-             "| Config | NP | NP_hc | DD$ | NP/DD$_hc | PF_hc | Trades | Advances? |",
-             "|---|---|---|---|---|---|---|---|"]
-    for _, r in port_df.iterrows():
-        lines.append(f"| {r['config']} | ${r['np']:+,.0f} | ${r['np_hc']:+,.0f} | "
-                     f"${r['dd_abs']:,.0f} | {r['ndd_hc']:.2f} | {r['pf_hc']:.2f} | "
-                     f"{int(r['trades'])} | {'YES' if r['advances_to_wfo'] else 'no'} |")
-    (OUT_DIR / "summary.md").write_text("\n".join(lines), encoding="utf-8")
-    print(f"\nWrote: {OUT_DIR/'per_stream.csv'}, {OUT_DIR/'portfolio.csv'}, {OUT_DIR/'summary.md'}")
     return 0
 
 
