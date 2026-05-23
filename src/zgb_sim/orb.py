@@ -204,6 +204,12 @@ def simulate(
     next_session_idx = 0
     sessions.sort(key=lambda s: s["range_end"])
 
+    # Fractal precompute (used by V1/V2/V3; harmless if all flags off)
+    fractal_cache = None
+    if cfg.fractal_trail or cfg.fractal_confirm or cfg.fractal_range:
+        from .fractals import confirmed_fractals
+        fractal_cache = confirmed_fractals(m5_bars, width=cfg.fractal_width)
+
     for k in range(len(t_ts)):
         ts_ns = int(t_ts[k])
         ts = pd.Timestamp(ts_ns)
@@ -263,10 +269,21 @@ def simulate(
                 break
             next_session_idx += 1
 
-            # Compute range bounds from M5 bars
+            # Compute range bounds — V3 uses fractals, default uses bar extremes
             rs_ns = pd.Timestamp(s["range_start"]).value
             re_ns = range_end_ns
-            rh, rl = _compute_range(m5_ts, m5_highs, m5_lows, rs_ns, re_ns)
+            if cfg.fractal_range and fractal_cache is not None:
+                # Fractals confirmed by range_end (no-peek) inside the range window
+                up_mask = (fractal_cache["up_ts"] >= rs_ns) & (fractal_cache["up_ts"] < re_ns)
+                dn_mask = (fractal_cache["dn_ts"] >= rs_ns) & (fractal_cache["dn_ts"] < re_ns)
+                ups = fractal_cache["up_price"][up_mask]
+                dns = fractal_cache["dn_price"][dn_mask]
+                if len(ups) == 0 or len(dns) == 0:
+                    continue  # skip session — no qualifying fractal
+                rh = float(ups.max())
+                rl = float(dns.min())
+            else:
+                rh, rl = _compute_range(m5_ts, m5_highs, m5_lows, rs_ns, re_ns)
             if rh <= 0 or rl <= 0:
                 continue
             range_pts = (rh - rl) / meta.point
