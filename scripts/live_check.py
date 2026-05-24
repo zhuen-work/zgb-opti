@@ -338,9 +338,9 @@ def main() -> int:
         recon_deals = filtered
         rec = reconcile_balance(prior_balance, ai.balance, recon_deals, args.symbol)
         print_reconciliation(rec)
-        print(f"  v2.1_h stream-source mapping (parent S1-6 + hedge S1h-S6h):")
+        print(f"  v6 stream-source mapping (parent S1-6 magics 1xxx-6xxx + STOP-ext hedge magics 8xxx):")
         for mag in (1111, 2222, 3333, 4444, 5555, 6666,
-                    7111, 7222, 7333, 7444, 7555, 7666):
+                    8111, 8222, 8333, 8444, 8555, 8666):
             name = STREAM_NAMES.get(mag, f"m{mag}")
             print(f"    {name:<8} ({mag}) -> {STREAM_SOURCE.get(mag, '?')}")
         print("=" * 78)

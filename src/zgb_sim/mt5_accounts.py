@@ -147,7 +147,13 @@ def get_broker_offset(symbol: str | None = None,
           f"Best observed = {best_offset_s/3600:+.3f}h, using {hours}h. "
           f"If this seems wrong, broker market may be quiet — retry during active hours.")
     if hours < -1 or hours > 12:
-        raise RuntimeError(
-            f"Detected broker offset {hours}h is out of plausible range [-1, +12]."
-        )
+        # Stale-tick on weekend / quiet hours yields nonsense offsets (e.g. -40h
+        # when last tick was Friday close). Fall back to documented Vantage
+        # default of +3 (UTC+3 in summer DST) per reference_vantage_broker_time
+        # memory. Workflow can still run for testing; Monday tick detection
+        # will yield the correct live value once markets reopen.
+        VANTAGE_DEFAULT_HOURS = 3
+        print(f"  [warn] get_broker_offset: detected {hours}h is implausible "
+              f"(market likely closed) — falling back to Vantage default +{VANTAGE_DEFAULT_HOURS}h.")
+        return timedelta(hours=VANTAGE_DEFAULT_HOURS)
     return timedelta(hours=hours)
