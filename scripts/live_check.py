@@ -19,7 +19,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -116,22 +116,30 @@ STREAM_NAMES = {1111: "ORB_S1", 2222: "ORB_S2", 3333: "ORB_S3",
                 # v2.1_h retry-hedge magics (legacy 7xxx, retired 2026-05-16)
                 7111: "ORB_S1h", 7222: "ORB_S2h", 7333: "ORB_S3h",
                 7444: "ORB_S4h", 7555: "ORB_S5h", 7666: "ORB_S6h",
-                # v3 reverse-hedge magics (8xxx, deployed 2026-05-18)
+                # Hedge magics 8xxx (same across v3/v4/v5/v6 deployments)
+                # v3=reverse single-TP, v4/v5=smart-TP LIMIT, v6=STOP-on-extension
                 8111: "ORB_S1r", 8222: "ORB_S2r", 8333: "ORB_S3r",
                 8444: "ORB_S4r", 8555: "ORB_S5r", 8666: "ORB_S6r",
                 5111: "HEDGE_S1", 5222: "HEDGE_S2", 5333: "HEDGE_S3"}
 # Parent magics vs hedge magics — used for parent-vs-hedge split in summaries
 PARENT_MAGICS = {1111, 2222, 3333, 4444, 5555, 6666}
-HEDGE_MAGICS  = {8111, 8222, 8333, 8444, 8555, 8666}  # v3 reverse-hedge
-# Active stream-source mapping. Update at every Sat reopt:
-#   S1-3 = PREVIOUS-week WFO  |  S4-6 = CURRENT-week WFO
-# Last rotation: 2026-05-16 (S1-3 = MAY9 R1-3 / S4-6 = MAY16 R2/R3/R4, dup-skipped)
-# Hedge round 5: tp/sl per stream from wfo_hedge_reverse_may16/winner_round5.json
-STREAM_SOURCE = {1111: "MAY9 R1 (prev)", 2222: "MAY9 R2 (prev)", 3333: "MAY9 R3 (prev)",
-                 4444: "MAY16 R2 (curr)", 5555: "MAY16 R3 (curr)", 6666: "MAY16 R4 (curr)",
-                 8111: "rev S1 tp=5.0 sl=1.0", 8222: "rev S2 tp=6.0 sl=1.0",
-                 8333: "rev S3 tp=8.5 sl=1.25", 8444: "rev S4 tp=6.0 sl=1.0",
-                 8555: "rev S5 tp=6.0 sl=1.0", 8666: "rev S6 tp=6.0 sl=1.0"}
+HEDGE_MAGICS  = {8111, 8222, 8333, 8444, 8555, 8666}  # v3-v6 hedge
+# Active stream-source mapping. Per [[feedback_no_rotation_use_top6]] (2026-05-24):
+# NO MORE ROTATION — all 6 streams come from the latest single WFO.
+# Last rotation: 2026-05-24 (v6 -- WFO expire-extend top-6 + rank#7 substitution for S6).
+# Hedge: v6 STOP-on-extension (uniform across all 6 streams: ext=100, tp=3.0, sl=1.0).
+STREAM_SOURCE = {1111: "v6 rank#1 SL=550 RR=4.0 HTP=0.2 Exp=720",
+                 2222: "v6 rank#2 SL=400 RR=3.5 HTP=0.4 Exp=240",
+                 3333: "v6 rank#3 SL=550 RR=4.0 HTP=0.2 Exp=480",
+                 4444: "v6 rank#4 SL=550 RR=4.0 HTP=0.2 Exp=240",
+                 5555: "v6 rank#5 SL=550 RR=2.0 HTP=0.4 Exp=720",
+                 6666: "v6 rank#7 SL=400 RR=3.5 HTP=0.4 Exp=720",
+                 8111: "v6 STOP-ext ext=100 tp=3.0 sl=1.0",
+                 8222: "v6 STOP-ext ext=100 tp=3.0 sl=1.0",
+                 8333: "v6 STOP-ext ext=100 tp=3.0 sl=1.0",
+                 8444: "v6 STOP-ext ext=100 tp=3.0 sl=1.0",
+                 8555: "v6 STOP-ext ext=100 tp=3.0 sl=1.0",
+                 8666: "v6 STOP-ext ext=100 tp=3.0 sl=1.0"}
 # XAUUSD.sc reports trade_contract_size=1.0 in symbol_info but realized P&L
 # reconciles only with 100 oz/lot. Verified via order history 2026-05-03.
 CONTRACT_SIZE = 100
@@ -267,6 +275,7 @@ def main() -> int:
                     help="Also show per-stream summary over the last N days (default 7); 0 to disable")
     args = ap.parse_args()
 
+    prior_balance: float | None = None
     if args.since:
         start = datetime.fromisoformat(args.since).astimezone(timezone.utc)
     else:
@@ -384,7 +393,7 @@ def main() -> int:
             print(f"\n  {label}: {total_trades} closed trades on {args.symbol}")
             if not by_magic:
                 print(f"  No deals in window.")
-                return
+                return 0.0, 0.0
 
             def fmt_row(mag, a):
                 stream = STREAM_NAMES.get(mag, f"m{mag}")
@@ -429,16 +438,59 @@ def main() -> int:
             print(f"\n  TOTAL net P&L: ${grand_net:+,.2f}  "
                   f"(parent ${parent_net:+,.0f} + hedge ${hedge_net:+,.0f}"
                   f"{f' + other ${other_net:+,.0f}' if other_net else ''})")
+            return parent_net, hedge_net
+
+        def hedge_era_for_date(d: date) -> str:
+            # EA progression timeline:
+            #   v3 single-tp  : 2026-05-18 .. 2026-05-20
+            #   v4 smart-tp   : 2026-05-21 .. 2026-05-23
+            #   v5 hedge-OFF  : 2026-05-24 (parents only, no hedge)
+            #   v6 STOP-ext   : 2026-05-25+ (parents + STOP-on-extension hedge)
+            # See project_orb_live_trade_log_v6_stopext.md for v6 details.
+            if d >= date(2026, 5, 25): return "v6 STOP-ext"
+            if d == date(2026, 5, 24): return "v5 parents-only"
+            if d >= date(2026, 5, 21): return "v4 smart-tp"
+            return "v3 single-tp"
 
         by_magic, events_to_journal = aggregate(start, end, collect_events=True)
-        print_summary(by_magic, "Daily window (since last check)")
+        day_parent, day_hedge = print_summary(by_magic, "Daily window (since last check)")
 
+        hist_parent = hist_hedge = None
         if args.history_days > 0:
             hist_start = end - timedelta(days=args.history_days)
             hist_by_magic, _ = aggregate(hist_start, end, collect_events=False)
             print(f"\n  --- History: last {args.history_days} days "
                   f"({hist_start.date()} -> {end.date()}) ---")
-            print_summary(hist_by_magic, f"Last {args.history_days}d")
+            hist_parent, hist_hedge = print_summary(hist_by_magic, f"Last {args.history_days}d")
+
+        # ===== PARENT-ONLY vs WITH-HEDGE counterfactual =====
+        # MANDATORY per feedback_live_check_format.md (added 2026-05-21).
+        # Shows whether the hedge layer is contributing positively to portfolio P&L.
+        print("\n" + "=" * 78)
+        print("  PARENT-ONLY vs WITH-HEDGE counterfactual")
+        print("=" * 78)
+        today_era = hedge_era_for_date(end.date())
+        hist_era_start = hedge_era_for_date((end - timedelta(days=args.history_days)).date())
+        hist_era_end = today_era
+        hist_era = (today_era if hist_era_start == hist_era_end
+                    else f"mixed ({hist_era_start} -> {hist_era_end})")
+
+        day_total = day_parent + day_hedge
+        d_dpct = (day_hedge / abs(day_parent) * 100) if day_parent else 0.0
+        print(f"  {'Scenario':<28} {'TODAY':>14}    {f'Last {args.history_days}d':>14}    Era")
+        print(f"  {'Parent only':<28} ${day_parent:>+12,.0f}    "
+              f"{('$' + format(hist_parent, '+,.0f')) if hist_parent is not None else 'n/a':>14}    (no hedge)")
+        print(f"  {'With hedge':<28} ${day_total:>+12,.0f}    "
+              f"{('$' + format((hist_parent or 0) + (hist_hedge or 0), '+,.0f')) if hist_parent is not None else 'n/a':>14}    {today_era}")
+        print(f"  {'Hedge d$':<28} ${day_hedge:>+12,.0f}    "
+              f"{('$' + format(hist_hedge, '+,.0f')) if hist_hedge is not None else 'n/a':>14}")
+        if hist_parent:
+            h_dpct = hist_hedge / abs(hist_parent) * 100
+            print(f"  {'Hedge d% of |parent|':<28} {d_dpct:>+12.1f}%    {h_dpct:>+13.1f}%    "
+                  f"(7d era: {hist_era})")
+        else:
+            print(f"  {'Hedge d% of |parent|':<28} {d_dpct:>+12.1f}%    {'n/a':>14}")
+        print("=" * 78)
 
         # Open positions snapshot — full table with SL/TP in $, magic, comments
         mt5.symbol_select(args.symbol, True)
@@ -507,8 +559,8 @@ def main() -> int:
                       f"{(d.comment or '')[:28]:<28}")
 
         # Projection comparison (View C — read output/forward_projection.json)
-        # Include BOTH parent (1xxx-6xxx) and v3 hedge (8xxx) magics to compare
-        # total v3 portfolio P&L vs sim projection (which is parent + hedge combined).
+        # Include BOTH parent (1xxx-6xxx) and hedge (8xxx) magics to compare
+        # total portfolio P&L vs sim projection (parent + hedge combined for v6).
         prod_magics = PARENT_MAGICS | HEDGE_MAGICS
         today_np = sum(a["net"] for m, a in by_magic.items() if m in prod_magics)
         wtd_start = end - timedelta(days=7)
@@ -553,6 +605,99 @@ def main() -> int:
             publish_positions(position_payloads, account=account_snap)
         except Exception as e:
             print(f"  [cf_publish] skipped: {type(e).__name__}: {e}")
+
+        # ============================================================
+        # HEDGE-FIRE-SANITY CHECK (mandatory section, refined 2026-05-19; v6 update 2026-05-24)
+        # ============================================================
+        # For each parent SL today, computes whether the v6 STOP-on-extension hedge would
+        # have fired in sim per EA logic (F1 filter + parent order type).
+        # Always printed — even on days with 0 SLs — so user never has to ask
+        # "should hedge have fired?" separately.
+        #
+        # Alert fires only when SLs WITHIN F1 window are silent (real failure).
+        # Slow SLs (Δt > F1) are correctly filtered by EA; counting them as
+        # "silent" would be a false positive (see 2026-05-19 case).
+        try:
+            HEDGE_F1_SEC = 1800  # v6 setfile _HEDGE_S*_MaxSecondsAfterEntry (30min)
+            today_start = datetime(end.year, end.month, end.day, tzinfo=timezone.utc)
+            today_start_b = today_start + broker_off
+            today_end_b   = end + broker_off
+            today_deals_raw = mt5.history_deals_get(today_start_b, today_end_b) or ()
+            parent_sls_today = sorted(
+                [d for d in today_deals_raw
+                 if d.symbol == args.symbol and d.entry == 1
+                 and int(d.magic) in PARENT_MAGICS
+                 and str(d.comment or "").startswith("[sl")],
+                key=lambda d: d.time_msc,
+            )
+            in_by_pos = {d.position_id: d for d in today_deals_raw
+                          if d.entry == 0 and int(d.magic) in PARENT_MAGICS}
+            # Count UNIQUE hedge positions via entry deals — not history_orders_get,
+            # which returns 2 rows per filled LIMIT (placement + activation) and
+            # double-counts. Fixed 2026-05-20 after misreport of "200% fire-rate".
+            hedge_entry_pos_ids = {d.position_id for d in today_deals_raw
+                                   if d.entry == 0 and int(d.magic) in HEDGE_MAGICS}
+
+            print(f"\n  [HEDGE-FIRE SANITY CHECK]  v6 STOP-on-extension sim vs actual")
+            print(f"  F1 cutoff = {HEDGE_F1_SEC}s ({HEDGE_F1_SEC // 60}min) "
+                  f"-- skip hedge if parent SL hit too late after entry.")
+            print(f"  v6 mechanism: on parent SL, place STOP at parent_SL +/- 100pt "
+                  f"(continuation direction); TP at 300pt; risk-equalized lots.")
+
+            if not parent_sls_today:
+                print(f"  -> 0 parent SLs today; nothing to evaluate. "
+                      f"Hedge positions placed: {len(hedge_entry_pos_ids)}.")
+            else:
+                print(f"  {'SL time (UTC)':<19} {'Stream':<7} {'Magic':>5} {'dt(s)':>6} "
+                      f"{'<=F1?':<6} {'Should hedge?'}")
+                n_within = n_outside = 0
+                for sl in parent_sls_today:
+                    in_d = in_by_pos.get(sl.position_id)
+                    sn = STREAM_NAMES.get(int(sl.magic), f"m{sl.magic}")
+                    sl_time = datetime.fromtimestamp(sl.time_msc / 1000, tz=timezone.utc)
+                    if in_d is None:
+                        dt_s = -1
+                        within = True   # unknown — conservative
+                        verdict = "?(no IN)"
+                    else:
+                        dt_s = int(sl.time - in_d.time)
+                        within = dt_s <= HEDGE_F1_SEC
+                        verdict = "YES" if within else "no (F1)"
+                    if within: n_within += 1
+                    else:      n_outside += 1
+                    print(f"  {sl_time.strftime('%Y-%m-%d %H:%M:%S'):<19} {sn:<7} "
+                          f"{sl.magic:>5} {dt_s:>6} {str(within):<6} {verdict}")
+                n_hedge = len(hedge_entry_pos_ids)
+                print(f"  -> SIM SAYS: {n_within} hedge STOPs SHOULD fire "
+                      f"(within F1). {n_outside} slow SLs correctly skipped by F1.")
+                print(f"  -> LIVE ACTUAL: {n_hedge} hedge positions placed (magics 8xxx).")
+                if n_within >= 1 and n_hedge == 0:
+                    if n_within >= 3:
+                        print(f"  !! HEDGE SILENT FAILURE: expected {n_within} hedge "
+                              f"STOP orders, got 0. EA hedge path broken or disabled.")
+                        try:
+                            from zgb_sim.cf_publish import publish_alert
+                            publish_alert("warn", "hedge_silent",
+                                f"{n_within} fast-whipsaw parent SLs today (within F1 {HEDGE_F1_SEC}s), "
+                                f"0 hedge STOP orders placed. EA hedge path broken or disabled.",
+                                context={"parent_sls_within_f1": n_within,
+                                          "parent_sls_outside_f1": n_outside,
+                                          "hedge_orders": 0,
+                                          "f1_seconds": HEDGE_F1_SEC,
+                                          "date": end.date().isoformat()})
+                        except Exception:
+                            pass
+                    else:
+                        print(f"  (only {n_within} within-F1 SLs today — under alert "
+                              f"threshold 3; logged but no alert fired)")
+                elif n_outside > 0 and n_within == 0:
+                    print(f"  -> NORMAL: F1 filter correctly skipped all SLs today (slow trend reversals).")
+                elif n_hedge > 0 and n_within > 0:
+                    print(f"  -> HEDGE WORKING: {n_hedge} hedges placed vs {n_within} expected "
+                          f"({100 * n_hedge // max(n_within, 1)}% fire-rate).")
+        except Exception as e:
+            print(f"  [hedge-silent check] skipped: {type(e).__name__}: {e}")
+
         print_projection_vs_actual(today_np, wtd_np, ai.balance)
 
         # Persist
