@@ -59,11 +59,17 @@ from sim_wfo_hedge_retry import (STREAM_CFGS, make_stream_cfg,
 
 
 # ==== Grid (2026-05-16 round 2: globals fixed at round-1 winners, sweep only per-stream) ====
-TP_MULTS = [3.0, 3.25, 3.5, 3.75, 4.0, 4.25, 4.5, 4.75, 5.0,
-            5.25, 5.5, 5.75, 6.0, 6.25, 6.5, 6.75, 7.0, 7.25,
-            7.5, 7.75, 8.0, 8.25, 8.5, 8.75, 9.0]              # 25 — 2026-05-17: finer step 0.25, range 3.0-9.0 (interior of prior winners 5-8.5)
+# 2026-05-19 smart-TP redesign: replaced single tp_mult with two-stage partial close.
+#   Stage 1 LIMIT (alpha lots): TP at sl_dist*sl_mult/alpha (= combined BE level).
+#   Stage 2 LIMIT ((1-alpha) lots): TP at sl_dist*sl_mult*profit_mult/(1-alpha) (= combined +profit_mult-1).
+#   Both share entry + SL. Constraint: alpha > 1/(profit_mult+1).
 SL_MULTS = [1.0, 1.1, 1.2, 1.3, 1.4, 1.5]                        # 6  — 2026-05-17 round 7: finer step 0.1 over 1.0-1.5 range
-BUFFER_PTS_LIST = [0]                                            # 1  — 2026-05-17 round 7: R6 picked 0 for 6/6 streams; dropped
+PROFIT_MULTS = [1.2, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0, 6.0]  # 10 — 2026-05-20 R2: extended upper end after R1 hit grid max (5/6 streams picked 3.0). Dropped low end <1.2 (nobody picked).
+PARTIAL_FRACTIONS = [0.5, 0.6, 0.7]                              # 3  — alpha, valid alpha > 1/(pm+1) (e.g. pm=1.2 → alpha > 0.455)
+# buffer_pts dimension dropped 2026-05-19: WFO consistently picked 0 across rounds
+# (R6 picked 0 for 6/6 streams), and the EA no longer has the input (parent +
+# hedge buffer inputs removed in the same session). Sim hedge entry is now
+# locked to parent entry_price, matching EA.
 EXPIRES_MIN = [240]                             # 1 (global) — fixed at round-1 winner
 F1_CUTOFFS_SEC = [1800]                         # 1 (global) — fixed at round-1 winner
 REGIME_GATES = ["off"]                          # 1 (global) — set to "off" 2026-05-16 to match EA (EA has no regime classifier)
@@ -74,9 +80,18 @@ class ReverseHedgeCfg:
     exp_min: int            # expire_minutes
     f1_sec: int             # F1 filter (0 = disabled)
     regime_gate: str        # "off" | "TIGHT_NORMAL" | "TIGHT_only"
-    tp_mult: float          # mirrored TP distance multiplier on parent sl_dist
     sl_mult: float          # hedge SL distance multiplier on parent sl_dist
-    buffer_pts: int         # hedge LIMIT offset past parent entry (deeper retrace required)
+    # Smart-TP params (2026-05-19): replaces tp_mult with two-stage close
+    partial_fraction: float # alpha: stage-1 portion of hedge lots
+    profit_mult: float      # stage-2 combined target = profit_mult * parent_loss
+    # 2026-05-24: optional fractal-confirm gate for the hedge LIMIT itself.
+    # For a parent BUY SL → SELL_LIMIT: arm only after an UP-fractal confirms
+    #   with high >= entry_price in (sl_ts, sl_ts + expire].
+    # For a parent SELL SL → BUY_LIMIT: arm only after a DOWN-fractal with
+    #   low <= entry_price.
+    # Rationale: skip "retrace immediately, continue against the hedge" fills.
+    fractal_confirm: bool = False
+    fractal_width: int = 5
 
 
 @dataclass(frozen=True)
@@ -157,7 +172,8 @@ def regime_allowed(regime: str, gate: str) -> bool:
 
 def simulate_reverse_hedges(sl_events, ticks_arr, stream_cfg: dict,
                               hcfg: ReverseHedgeCfg,
-                              regime_by_session: dict) -> list:
+                              regime_by_session: dict,
+                              fractal_cache: dict | None = None) -> list:
     """Post-process reverse-hedge for one window. Returns list of (exit_ts_ns, pnl).
 
     For each parent SL event, places an OPPOSITE-direction LIMIT pending at
@@ -171,20 +187,28 @@ def simulate_reverse_hedges(sl_events, ticks_arr, stream_cfg: dict,
     expire_ns = int(hcfg.exp_min * 60 * 1_000_000_000)
     walk_max_ns = int(3 * 24 * 3600 * 1_000_000_000)
     parent_sl_dist = stream_cfg["fixed_sl_pts"] * POINT
-    sl_dist_price = parent_sl_dist * hcfg.sl_mult     # hedge SL distance
-    tp_dist_price = parent_sl_dist * hcfg.tp_mult     # hedge TP distance (still relative to parent SL)
+    sl_dist_price = parent_sl_dist * hcfg.sl_mult     # hedge SL distance (common to both stages)
+    # Smart-TP distances (2026-05-19):
+    #   Stage 1 TP at sl_dist_price / alpha (= price where alpha lots' gain = parent loss $)
+    #   Stage 2 TP at sl_dist_price * profit_mult / (1 - alpha) (combined target = pm * loss)
+    alpha = hcfg.partial_fraction
+    pm = hcfg.profit_mult
+    # Math validity (alpha > 1/(pm+1) keeps tp2 deeper than tp1)
+    if alpha <= 0.0 or alpha >= 1.0 or pm <= 1.0 or alpha <= 1.0 / (pm + 1.0):
+        # Caller passed an invalid combo; skip simulation by returning empty.
+        return []
+    tp1_dist_price = sl_dist_price / alpha
+    tp2_dist_price = sl_dist_price * pm / (1.0 - alpha)
     out = []
 
     for ev in sl_events:
         sl_ts = ev["ts_ns"]
         direction = ev["direction"]
         entry_price = ev["entry_price"]
-        # Risk-equalization: scale hedge lots so dollar-loss-on-SL = parent dollar-risk
-        # regardless of sl_mult. Math:
-        #   parent_risk_$ = parent_sl_dist * parent_lots * CONTRACT
-        #   hedge_risk_$ = (sl_mult * parent_sl_dist) * hedge_lots * CONTRACT
-        #   Equating -> hedge_lots = parent_lots / sl_mult
-        lots = ev["lots"] / hcfg.sl_mult
+        # Risk-equalization: scale total hedge lots by 1/sl_mult to match parent $-risk.
+        lots_total = ev["lots"] / hcfg.sl_mult
+        lots_stage1 = lots_total * alpha
+        lots_stage2 = lots_total * (1.0 - alpha)
 
         # F1 filter
         if hcfg.f1_sec > 0:
@@ -199,33 +223,50 @@ def simulate_reverse_hedges(sl_events, ticks_arr, stream_cfg: dict,
             if not regime_allowed(regime, hcfg.regime_gate):
                 continue
 
-        # Reverse hedge geometry (mirrored).
-        # buffer_pts pushes the LIMIT past parent entry — requires deeper retrace
-        # past parent SL before the hedge can fill (selects for stronger reversals).
-        buffer_price = hcfg.buffer_pts * POINT
-        if direction == 1:    # parent BUY SL'd (price below entry) → SELL_LIMIT above entry
+        # Geometry: both LIMITs at parent entry_price, shared SL, separate TPs.
+        if direction == 1:    # parent BUY SL'd → SELL_LIMIT hedges (TPs below entry)
             hedge_dir = -1
-            hedge_entry = entry_price + buffer_price
-            hedge_sl = hedge_entry + sl_dist_price       # above (SELL SL)
-            hedge_tp = hedge_entry - tp_dist_price       # below (SELL TP)
-        else:                  # parent SELL SL'd (price above entry) → BUY_LIMIT below entry
+            hedge_entry = entry_price
+            hedge_sl = hedge_entry + sl_dist_price
+            hedge_tp1 = hedge_entry - tp1_dist_price
+            hedge_tp2 = hedge_entry - tp2_dist_price
+        else:                  # parent SELL SL'd → BUY_LIMIT hedges (TPs above entry)
             hedge_dir = 1
-            hedge_entry = entry_price - buffer_price
-            hedge_sl = hedge_entry - sl_dist_price       # below (BUY SL)
-            hedge_tp = hedge_entry + tp_dist_price       # above (BUY TP)
+            hedge_entry = entry_price
+            hedge_sl = hedge_entry - sl_dist_price
+            hedge_tp1 = hedge_entry + tp1_dist_price
+            hedge_tp2 = hedge_entry + tp2_dist_price
 
-        # Pending lifecycle: from sl_ts to sl_ts + expire_ns
-        i0 = np.searchsorted(ts_arr, sl_ts)
+        # 2026-05-24: optional fractal-confirm gate. Delays LIMIT arming until
+        # a same-momentum fractal confirms past entry. For parent BUY SL'd
+        # (hedge_dir=-1, SELL_LIMIT at entry above current), we want an
+        # UP-fractal with high >= entry confirmed in (sl_ts, sl_ts + expire].
+        # For parent SELL SL'd (hedge_dir=1, BUY_LIMIT at entry below current),
+        # we want a DOWN-fractal with low <= entry.
+        arm_ts = sl_ts
+        if hcfg.fractal_confirm and fractal_cache is not None:
+            window_end = sl_ts + expire_ns
+            if hedge_dir == -1:
+                ts_arr_f = fractal_cache["up_ts"]
+                pr_arr_f = fractal_cache["up_price"]
+                mask = (ts_arr_f > sl_ts) & (ts_arr_f <= window_end) & (pr_arr_f >= hedge_entry)
+            else:
+                ts_arr_f = fractal_cache["dn_ts"]
+                pr_arr_f = fractal_cache["dn_price"]
+                mask = (ts_arr_f > sl_ts) & (ts_arr_f <= window_end) & (pr_arr_f <= hedge_entry)
+            if not mask.any():
+                continue   # no qualifying fractal in window → skip hedge entirely
+            arm_ts = int(ts_arr_f[mask].min())
+
+        # Pending lifecycle: LIMIT trigger window starts at arm_ts (= sl_ts when no fractal gate)
+        i0 = np.searchsorted(ts_arr, arm_ts)
         i1 = np.searchsorted(ts_arr, sl_ts + expire_ns)
         if i1 <= i0:
             continue
 
-        # LIMIT fire triggers:
-        #   SELL_LIMIT: bid >= entry (price rose to entry from below)
-        #   BUY_LIMIT:  ask <= entry (price dropped to entry from above)
-        if hedge_dir == -1:  # SELL_LIMIT
+        if hedge_dir == -1:
             hits = np.where(bid[i0:i1] >= hedge_entry)[0]
-        else:                 # BUY_LIMIT
+        else:
             hits = np.where(ask[i0:i1] <= hedge_entry)[0]
         if len(hits) == 0:
             continue
@@ -237,26 +278,40 @@ def simulate_reverse_hedges(sl_events, ticks_arr, stream_cfg: dict,
         if len(post_bid) == 0:
             continue
 
-        # Position lifecycle (hedge_dir = -1 SELL, +1 BUY):
-        #   SELL position: SL when ask >= hedge_sl, TP when bid <= hedge_tp
-        #   BUY position:  SL when bid <= hedge_sl, TP when ask >= hedge_tp
-        if hedge_dir == -1:
+        # SL hit index (shared by both stages — same SL price)
+        # TP1 hit index (stage 1, shallower) + TP2 hit index (stage 2, deeper)
+        if hedge_dir == -1:  # SELL position: SL when ask >= sl, TP when bid <= tp
             sl_h = np.where(post_ask >= hedge_sl)[0]
-            tp_h = np.where(post_bid <= hedge_tp)[0]
-        else:
+            tp1_h = np.where(post_bid <= hedge_tp1)[0]
+            tp2_h = np.where(post_bid <= hedge_tp2)[0]
+        else:                 # BUY position: SL when bid <= sl, TP when ask >= tp
             sl_h = np.where(post_bid <= hedge_sl)[0]
-            tp_h = np.where(post_ask >= hedge_tp)[0]
+            tp1_h = np.where(post_ask >= hedge_tp1)[0]
+            tp2_h = np.where(post_ask >= hedge_tp2)[0]
         sl_first = sl_h[0] if len(sl_h) else 10**18
-        tp_first = tp_h[0] if len(tp_h) else 10**18
-        if sl_first == 10**18 and tp_first == 10**18:
-            continue
-        if sl_first <= tp_first:
-            ex_px = hedge_sl; ex_idx = ent_idx + 1 + sl_first
+        tp1_first = tp1_h[0] if len(tp1_h) else 10**18
+        tp2_first = tp2_h[0] if len(tp2_h) else 10**18
+
+        # Resolve each stage independently — each is its own LIMIT order.
+        # Stage 1: exit = whichever of (TP1, SL) comes first
+        if tp1_first < sl_first:
+            ex1_px = hedge_tp1; ex1_idx = ent_idx + 1 + tp1_first
+        elif sl_first < 10**18:
+            ex1_px = hedge_sl;  ex1_idx = ent_idx + 1 + sl_first
         else:
-            ex_px = hedge_tp; ex_idx = ent_idx + 1 + tp_first
-        # PnL is hedge_dir * (exit - entry) * contract * lots
-        pnl = hedge_dir * (ex_px - hedge_entry) * CONTRACT * lots
-        out.append((int(ts_arr[ex_idx]), float(pnl)))
+            continue   # neither fired within walk-window
+        pnl1 = hedge_dir * (ex1_px - hedge_entry) * CONTRACT * lots_stage1
+        out.append((int(ts_arr[ex1_idx]), float(pnl1)))
+
+        # Stage 2: exit = whichever of (TP2, SL) comes first
+        if tp2_first < sl_first:
+            ex2_px = hedge_tp2; ex2_idx = ent_idx + 1 + tp2_first
+        elif sl_first < 10**18:
+            ex2_px = hedge_sl;  ex2_idx = ent_idx + 1 + sl_first
+        else:
+            continue
+        pnl2 = hedge_dir * (ex2_px - hedge_entry) * CONTRACT * lots_stage2
+        out.append((int(ts_arr[ex2_idx]), float(pnl2)))
     return out
 
 
@@ -268,12 +323,15 @@ def main() -> int:
     WINDOWS = {"may9": WINDOWS_MAY9, "may16": WINDOWS_MAY16, "may23": WINDOWS_MAY23}[args.windows]
     win_tag = args.windows
 
+    # Filter PARTIAL_FRACTIONS / PROFIT_MULTS pairs that satisfy alpha > 1/(pm+1).
+    valid_pairs = [(pm, a) for pm in PROFIT_MULTS for a in PARTIAL_FRACTIONS
+                    if a > 1.0 / (pm + 1.0)]
     n_globals = len(EXPIRES_MIN) * len(F1_CUTOFFS_SEC) * len(REGIME_GATES)
-    n_per_stream = len(TP_MULTS) * len(SL_MULTS) * len(BUFFER_PTS_LIST)
+    n_per_stream = len(SL_MULTS) * len(valid_pairs)
     print("=" * 110)
-    print(f"  REVERSE-HEDGE WFO (global exp_min/f1_sec/regime_gate, per-stream tp_mult/sl_mult/buffer_pts)")
+    print(f"  REVERSE-HEDGE WFO (global exp_min/f1_sec/regime_gate, per-stream sl_mult/partial_fraction/profit_mult)")
     print(f"  Windows: {win_tag.upper()} ({len(WINDOWS)} folds, IS+OOS each)")
-    print(f"  Grid: tp({len(TP_MULTS)}) × sl({len(SL_MULTS)}) × buf({len(BUFFER_PTS_LIST)}) per-stream  ×  "
+    print(f"  Grid: sl({len(SL_MULTS)}) × valid_pm_alpha_pairs({len(valid_pairs)}) per-stream  ×  "
           f"exp({len(EXPIRES_MIN)}) × f1({len(F1_CUTOFFS_SEC)}) × gate({len(REGIME_GATES)}) global")
     print(f"  Globals = {n_globals}.  Per-stream sims per window = {n_globals*n_per_stream*6}")
     print("=" * 110)
@@ -324,24 +382,23 @@ def main() -> int:
                     for exp_min in EXPIRES_MIN:
                         for f1 in F1_CUTOFFS_SEC:
                             for gate in REGIME_GATES:
-                                for tp_mult in TP_MULTS:
-                                    for sl_mult in SL_MULTS:
-                                        for buf in BUFFER_PTS_LIST:
-                                            hcfg = ReverseHedgeCfg(
-                                                exp_min=exp_min, f1_sec=f1,
-                                                regime_gate=gate, tp_mult=tp_mult,
-                                                sl_mult=sl_mult, buffer_pts=buf,
-                                            )
-                                            h_deals = simulate_reverse_hedges(
-                                                sl_ev, t_arr, STREAM_CFGS[stream],
-                                                hcfg, regime_map,
-                                            )
-                                            results[label][stream][(exp_min, f1, gate, tp_mult, sl_mult, buf)] = h_deals
+                                for sl_mult in SL_MULTS:
+                                    for (pm, alpha) in valid_pairs:
+                                        hcfg = ReverseHedgeCfg(
+                                            exp_min=exp_min, f1_sec=f1,
+                                            regime_gate=gate, sl_mult=sl_mult,
+                                            partial_fraction=alpha, profit_mult=pm,
+                                        )
+                                        h_deals = simulate_reverse_hedges(
+                                            sl_ev, t_arr, STREAM_CFGS[stream],
+                                            hcfg, regime_map,
+                                        )
+                                        results[label][stream][(exp_min, f1, gate, sl_mult, alpha, pm)] = h_deals
                 print(f"  {label} {tag} {s.date()}->{e.date()} done streams={len(all_streams)}  "
                       f"[{time.time()-t_start:.0f}s]")
 
-        # For each global candidate, pick per-stream best (tp_mult, sl_mult, buffer_pts) jointly by IS NP sum.
-        print("\n  Choosing per-stream (tp_mult, sl_mult, buffer_pts) for each global (exp, f1, gate)...")
+        # For each global candidate, pick per-stream best (sl_mult, alpha, pm) jointly by IS NP sum.
+        print("\n  Choosing per-stream (sl_mult, partial_fraction, profit_mult) for each global (exp, f1, gate)...")
         global_combos = [(e, f, g) for e in EXPIRES_MIN
                          for f in F1_CUTOFFS_SEC
                          for g in REGIME_GATES]
@@ -350,22 +407,21 @@ def main() -> int:
             tpsl_choice = {}
             for stream in all_streams:
                 best_tpsl = None; best_total_np = -1e18
-                for tp_mult in TP_MULTS:
-                    for sl_mult in SL_MULTS:
-                        for buf in BUFFER_PTS_LIST:
-                            total_np = 0.0
-                            for label, *_ in WINDOWS:
-                                base_deals = is_baselines[label][stream]
-                                h_deals = is_results[label][stream][(exp_min, f1, gate, tp_mult, sl_mult, buf)]
-                                np_, _, _ = aggregate(base_deals + h_deals)
-                                total_np += np_
-                            if total_np > best_total_np:
-                                best_total_np = total_np
-                                best_tpsl = (tp_mult, sl_mult, buf)
+                for sl_mult in SL_MULTS:
+                    for (pm, alpha) in valid_pairs:
+                        total_np = 0.0
+                        for label, *_ in WINDOWS:
+                            base_deals = is_baselines[label][stream]
+                            h_deals = is_results[label][stream][(exp_min, f1, gate, sl_mult, alpha, pm)]
+                            np_, _, _ = aggregate(base_deals + h_deals)
+                            total_np += np_
+                        if total_np > best_total_np:
+                            best_total_np = total_np
+                            best_tpsl = (sl_mult, alpha, pm)
                 tpsl_choice[stream] = best_tpsl
             per_global_tpsl[(exp_min, f1, gate)] = tpsl_choice
 
-        # Build per-window portfolio NP/DD using selected tp_mults, ready for rank_with_p0.
+        # Build per-window portfolio NP/DD using selected configs, ready for rank_with_p0.
         grid_for_rank = [GlobalCfg(exp_min=e, f1_sec=f, regime_gate=g)
                          for (e, f, g) in global_combos]
         rows_is = {label: [] for label, *_ in WINDOWS}
@@ -375,11 +431,11 @@ def main() -> int:
             for label, *_ in WINDOWS:
                 p_is = []; p_oos = []
                 for stream in all_streams:
-                    tp, sl, buf = tpsl_choice[stream]
+                    sl, alpha, pm = tpsl_choice[stream]
                     p_is.extend(is_baselines[label][stream])
-                    p_is.extend(is_results[label][stream][(exp_min, f1, gate, tp, sl, buf)])
+                    p_is.extend(is_results[label][stream][(exp_min, f1, gate, sl, alpha, pm)])
                     p_oos.extend(oos_baselines[label][stream])
-                    p_oos.extend(oos_results[label][stream][(exp_min, f1, gate, tp, sl, buf)])
+                    p_oos.extend(oos_results[label][stream][(exp_min, f1, gate, sl, alpha, pm)])
                 np_is, dd_is, pf_is = aggregate(p_is)
                 np_oos, dd_oos, pf_oos = aggregate(p_oos)
                 rows_is[label].append({"exp_min": exp_min, "f1_sec": f1, "regime_gate": gate,
@@ -401,19 +457,19 @@ def main() -> int:
         w_exp = winner["cfg"].exp_min; w_f1 = winner["cfg"].f1_sec; w_gate = winner["cfg"].regime_gate
         w_tpsl = per_global_tpsl[(w_exp, w_f1, w_gate)]
         print(f"\n  WINNER: exp_min={w_exp}  f1_sec={w_f1}  regime_gate={w_gate}")
-        print(f"  Per-stream (tp_mult, sl_mult, buffer_pts):")
+        print(f"  Per-stream (sl_mult, partial_fraction, profit_mult):")
         for s in all_streams:
-            tp, sl, buf = w_tpsl[s]
-            print(f"    {s}: tp_mult={tp}  sl_mult={sl}  buffer_pts={buf}")
+            sl, alpha, pm = w_tpsl[s]
+            print(f"    {s}: sl_mult={sl}  alpha={alpha}  profit_mult={pm}")
 
         out_dir = ROOT / "output" / f"wfo_hedge_reverse_{win_tag}"
         out_dir.mkdir(parents=True, exist_ok=True)
         wj = {"expire_minutes": int(w_exp),
               "max_seconds_after_entry": int(w_f1),
               "regime_gate": w_gate,
-              "per_stream_tp_mult": {s: float(w_tpsl[s][0]) for s in all_streams},
-              "per_stream_sl_mult": {s: float(w_tpsl[s][1]) for s in all_streams},
-              "per_stream_buffer_pts": {s: int(w_tpsl[s][2]) for s in all_streams}}
+              "per_stream_sl_mult":          {s: float(w_tpsl[s][0]) for s in all_streams},
+              "per_stream_partial_fraction": {s: float(w_tpsl[s][1]) for s in all_streams},
+              "per_stream_profit_mult":      {s: float(w_tpsl[s][2]) for s in all_streams}}
         (out_dir / "winner.json").write_text(json.dumps(wj, indent=2))
         print(f"  Persisted: {out_dir / 'winner.json'}")
 
@@ -432,9 +488,9 @@ def main() -> int:
             base_deals, sl_ev = run_baseline_window(
                 stream, ticks_full, m1_full, m5_full, meta, PARENT_RISK_PROD
             )
-            tp, sl, buf = w_tpsl[stream]
+            sl, alpha, pm = w_tpsl[stream]
             hcfg = ReverseHedgeCfg(exp_min=w_exp, f1_sec=w_f1, regime_gate=w_gate,
-                                    tp_mult=tp, sl_mult=sl, buffer_pts=buf)
+                                    sl_mult=sl, partial_fraction=alpha, profit_mult=pm)
             h_deals = simulate_reverse_hedges(sl_ev, t_arr_full,
                                                 STREAM_CFGS[stream], hcfg, regime_map_full)
             all_base.extend(base_deals)
@@ -446,9 +502,9 @@ def main() -> int:
                 "hedge_np": sum(p for _, p in h_deals),
                 "hedge_n": len(h_deals),
                 "hedge_wr": wr,
-                "tp_mult": tp,
                 "sl_mult": sl,
-                "buffer_pts": buf,
+                "alpha": alpha,
+                "profit_mult": pm,
             }
         np_b, dd_b, pf_b = aggregate(all_base)
         ndd_b = (np_b / (dd_b/100 * (DEPOSIT + np_b))) if dd_b > 0 else 0
@@ -463,11 +519,11 @@ def main() -> int:
 
         print(f"\n  Per-stream reverse-hedge contribution "
               f"(global exp={w_exp} f1={w_f1} gate={w_gate}):")
-        print(f"  {'Stream':<6}  {'tp':<5} {'sl':<5} {'buf':<5} {'parent_NP':>10} {'parent_n':>8} "
+        print(f"  {'Stream':<6}  {'sl':<5} {'alpha':<6} {'pm':<5} {'parent_NP':>10} {'parent_n':>8} "
               f"{'rev_NP':>10} {'rev_n':>6} {'rev_W':>6}")
         for s in all_streams:
             ps = per_stream_summary[s]
-            print(f"  {s:<6}  {ps['tp_mult']:<5} {ps['sl_mult']:<5} {ps['buffer_pts']:<5} "
+            print(f"  {s:<6}  {ps['sl_mult']:<5} {ps['alpha']:<6} {ps['profit_mult']:<5} "
                   f"${ps['parent_np']:>+8,.0f} {ps['parent_n']:>8} "
                   f"${ps['hedge_np']:>+8,.0f} {ps['hedge_n']:>6} {ps['hedge_wr']:>5.0f}%")
 
