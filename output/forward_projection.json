@@ -1,7 +1,7 @@
 {
-  "saved_at": "2026-05-24T08:27:40+00:00",
-  "setfile": "dt818_pro_v5_9pct_may23_may16.set",
-  "method": "view_c_decay_adjusted_v5_parents_only",
+  "saved_at": "2026-05-24T15:39:35+00:00",
+  "setfile": "dt818_pro_v6_9pct_may23_may16.set",
+  "method": "view_c_decay_adjusted_v6_parents_plus_stopext",
   "deposit_sim": 10000.0,
   "baseline_balance": 71539.25,
   "balance_multiplier": 1.0,
@@ -9,14 +9,14 @@
   "decay_factor": 0.9,
   "live_haircut_np": 0.94,
   "combined_haircut": 0.846,
-  "avg_oos_slope_pct": 115.91353558516903,
+  "avg_oos_slope_pct": 134.34348089086765,
   "per_stream_slopes_pct": {
-    "ORB_S1": 125.15942028985583,
-    "ORB_S2": 91.81300687927626,
-    "ORB_S3": 133.5536398467438,
-    "ORB_S4": 106.60731948565942,
-    "ORB_S5": 122.81003937007948,
-    "ORB_S6": 115.53778763939934
+    "ORB_S1": 149.70517693074123,
+    "ORB_S2": 100.36694169821021,
+    "ORB_S3": 153.33822091886645,
+    "ORB_S4": 121.76360861455132,
+    "ORB_S5": 140.71405105814839,
+    "ORB_S6": 140.17288612468835
   },
   "sanity_window": {
     "start": "2026-02-14",
@@ -24,51 +24,51 @@
     "iso_weeks": 14
   },
   "raw_sim": {
-    "portfolio_np": 263547.0,
-    "dd_pct": 5.1001,
-    "dd_abs": 14279.6,
-    "ndd": 18.4562,
-    "pf": 2.2895,
-    "trades": 2122,
-    "wr": 56.9746
+    "portfolio_np": 291672.0,
+    "dd_pct": 5.3158,
+    "dd_abs": 16421.7,
+    "ndd": 17.7614,
+    "pf": 2.1743,
+    "trades": 2833,
+    "wr": 60.9248
   },
   "weekly_live": {
-    "mean_np": 16136,
-    "median_np": 10476,
-    "p10_np": 4469,
-    "p90_np": 32432,
-    "worst_np": 232,
-    "best_np": 60144,
-    "std_np": 15112,
-    "green_week_prob": 1.0,
-    "expected_roi_pct": 22.56,
+    "mean_np": 16674,
+    "median_np": 11946,
+    "p10_np": 6592,
+    "p90_np": 35048,
+    "worst_np": -1022,
+    "best_np": 55003,
+    "std_np": 14048,
+    "green_week_prob": 0.93,
+    "expected_roi_pct": 23.31,
     "n_sample_weeks": 14,
-    "view_c_planning_range_low": 8875,
-    "view_c_planning_range_high": 17750,
-    "view_c_tolerance_red_usd": -11941,
-    "parent_contribution_mean_np": 16136,
-    "hedge_contribution_mean_np": 0,
-    "hedge_share_pct": 0.0,
-    "target_balance_floor": 76008,
-    "target_balance_mean": 87675,
-    "target_balance_stretch": 103971
+    "view_c_planning_range_low": 9171,
+    "view_c_planning_range_high": 18341,
+    "view_c_tolerance_red_usd": -12339,
+    "parent_contribution_mean_np": 15066,
+    "hedge_contribution_mean_np": 1608,
+    "hedge_share_pct": 9.6,
+    "target_balance_floor": 78131,
+    "target_balance_mean": 88213,
+    "target_balance_stretch": 106587
   },
   "daily_live": {
-    "mean_np": 3227,
-    "p10_np": 894,
-    "p90_np": 6486,
-    "expected_roi_pct": 4.51,
-    "parent_contribution_mean": 3227,
-    "hedge_contribution_mean": 0,
-    "target_balance_floor": 72433,
-    "target_balance_mean": 74766,
-    "target_balance_stretch": 78026
+    "mean_np": 3335,
+    "p10_np": 1318,
+    "p90_np": 7010,
+    "expected_roi_pct": 4.66,
+    "parent_contribution_mean": 3013,
+    "hedge_contribution_mean": 322,
+    "target_balance_floor": 72858,
+    "target_balance_mean": 74874,
+    "target_balance_stretch": 78549
   },
   "tolerance": {
-    "single_week_red_usd": -14087.46,
+    "single_week_red_usd": -11422.5,
     "consecutive_red_weeks": 2,
-    "daily_outlier_red_usd": -2817.49,
-    "four_week_trailing_mean_floor": 5647.68,
+    "daily_outlier_red_usd": -2284.5,
+    "four_week_trailing_mean_floor": 5835.89,
     "investigation_triggers": [
       "single week NP < single_week_red_usd",
       "2+ consecutive red weeks",
@@ -82,81 +82,132 @@
     "2026-05-23: added target_balance_{floor,mean,stretch} to weekly_live + daily_live + new monthly_live block (4w compound).",
     "2026-05-23: promoted target_balance_{floor,mean,stretch} to top-level (multiple naming variants) so dashboard ingest flatten-whitelist picks them up.",
     "2026-05-24: v5 setfile (no rotation, fractal_confirm=true, hedges DISABLED). Parents from WFO expire-extend top-6 + rank#7 substitution for S6. v5 hedge WFO failed decay-filter on recent tape; ship parents-only. Projection sim 98d at 1.5%/stream 30pt: NP=$+263,547 NP/DD$=18.46. Method: view_c_decay_adjusted_v5_parents_only.",
-    "2026-05-24: v5 setfile (no rotation, fractal_confirm=true, hedges DISABLED). Parents from WFO expire-extend top-6 + rank#7 substitution for S6. v5 hedge WFO failed decay-filter on recent tape; ship parents-only. Projection sim 98d at 1.5%/stream 30pt: NP=$+263,547 NP/DD$=18.46. Method: view_c_decay_adjusted_v5_parents_only."
+    "2026-05-24: v5 setfile (no rotation, fractal_confirm=true, hedges DISABLED). Parents from WFO expire-extend top-6 + rank#7 substitution for S6. v5 hedge WFO failed decay-filter on recent tape; ship parents-only. Projection sim 98d at 1.5%/stream 30pt: NP=$+263,547 NP/DD$=18.46. Method: view_c_decay_adjusted_v5_parents_only.",
+    "2026-05-24 PT2: v6 setfile (parents v5 + STOP-on-extension hedge). STOP-ext params: ext_pts=100, tp_mult=3.0, sl_mult=1.0 (uniform across S1-S6). Sim 98d at 1.5%/stream 30pt: parent NP=$+263,547 + hedge NP=$+28,125 = combined $+291,672 NP/DD$=17.76. Hedge contributes 9.6% of total. Method: view_c_decay_adjusted_v6_parents_plus_stopext."
   ],
-  "ea": "DT818_pro_v5.mq5",
-  "ea_version": "v5 V2 fractal-confirmed entry (no rotation; hedges disabled, MAY23 reopt 2026-05-24)",
-  "wfo_log_source": "C:\\Users\\Zhu-En\\zgb-opti\\output\\wfo_orb_v5_expire_extend\\oos_rank.csv",
+  "ea": "DT818_pro_v6.mq5",
+  "ea_version": "v6 V2 fractal-confirmed entry + STOP-on-extension hedge (MAY23 reopt 2026-05-24)",
+  "wfo_log_source": "C:\\Users\\Zhu-En\\zgb-opti\\output\\wfo_hedge_geometry_may23\\geometry_sweep.csv",
   "monthly_live": {
     "horizon_weeks": 4,
-    "compound_mean_roi_pct": 125.6,
-    "target_balance_floor": 91162.09,
-    "target_balance_mean": 161390.97,
-    "target_balance_stretch": 319166.2
+    "compound_mean_roi_pct": 131.18,
+    "target_balance_floor": 101780.83,
+    "target_balance_mean": 165387.11,
+    "target_balance_stretch": 352519.78
   },
-  "weekly_target_balance_floor": 76008,
-  "weekly_target_balance_mean": 87675,
-  "weekly_target_balance_stretch": 103971,
-  "daily_target_balance_floor": 72433,
-  "daily_target_balance_mean": 74766,
-  "daily_target_balance_stretch": 78026,
-  "monthly_target_balance_floor": 91162.09,
-  "monthly_target_balance_mean": 161390.97,
-  "monthly_target_balance_stretch": 319166.2,
-  "monthly_compound_mean_roi_pct": 125.6,
-  "target_balance_floor": 76008,
-  "target_balance_mean": 87675,
-  "target_balance_stretch": 103971,
+  "weekly_target_balance_floor": 78131,
+  "weekly_target_balance_mean": 88213,
+  "weekly_target_balance_stretch": 106587,
+  "daily_target_balance_floor": 72858,
+  "daily_target_balance_mean": 74874,
+  "daily_target_balance_stretch": 78549,
+  "monthly_target_balance_floor": 101780.83,
+  "monthly_target_balance_mean": 165387.11,
+  "monthly_target_balance_stretch": 352519.78,
+  "monthly_compound_mean_roi_pct": 131.18,
+  "target_balance_floor": 78131,
+  "target_balance_mean": 88213,
+  "target_balance_stretch": 106587,
   "raw_sim_98d": {
-    "v5_no_hedge_np": 263547.0,
-    "v5_dd_pct": 5.1,
-    "v5_ndd": 18.46,
-    "v5_pf": 2.29,
-    "v5_trades": 2122,
-    "compound_weekly_rate_v5": 0.266616495684864
+    "v6_combined_np": 291672.0,
+    "v6_parent_np": 263547.0,
+    "v6_hedge_np": 28125.0,
+    "v6_hedge_share_pct": 9.6,
+    "v6_dd_pct": 5.32,
+    "v6_ndd": 17.76,
+    "v6_pf": 2.17,
+    "v6_trades": 2833,
+    "v6_hedge_n": 711,
+    "compound_weekly_rate_v6": 0.27550178761844757
   },
   "per_stream_sim_contribution_98d_71539usd": {
     "S1": {
       "parent_np": 43189.0,
-      "hedge_np": 0.0,
-      "combined": 43189.0,
-      "hedge_n": 0,
-      "hedge_wr": 0.0
+      "hedge_np": 4198.0,
+      "combined": 47387.0,
+      "hedge_n": 120,
+      "hedge_wr": 75.0
     },
     "S2": {
       "parent_np": 53109.0,
-      "hedge_np": 0.0,
-      "combined": 53109.0,
-      "hedge_n": 0,
-      "hedge_wr": 0.0
+      "hedge_np": 4191.0,
+      "combined": 57300.0,
+      "hedge_n": 121,
+      "hedge_wr": 65.3
     },
     "S3": {
       "parent_np": 38305.0,
-      "hedge_np": 0.0,
-      "combined": 38305.0,
-      "hedge_n": 0,
-      "hedge_wr": 0.0
+      "hedge_np": 5070.0,
+      "combined": 43376.0,
+      "hedge_n": 114,
+      "hedge_wr": 78.9
     },
     "S4": {
       "parent_np": 34098.0,
-      "hedge_np": 0.0,
-      "combined": 34098.0,
-      "hedge_n": 0,
-      "hedge_wr": 0.0
+      "hedge_np": 3851.0,
+      "combined": 37949.0,
+      "hedge_n": 96,
+      "hedge_wr": 78.1
     },
     "S5": {
       "parent_np": 28862.0,
-      "hedge_np": 0.0,
-      "combined": 28862.0,
-      "hedge_n": 0,
-      "hedge_wr": 0.0
+      "hedge_np": 3289.0,
+      "combined": 32151.0,
+      "hedge_n": 107,
+      "hedge_wr": 77.6
     },
     "S6": {
       "parent_np": 65984.0,
-      "hedge_np": 0.0,
-      "combined": 65984.0,
-      "hedge_n": 0,
-      "hedge_wr": 0.0
+      "hedge_np": 7526.0,
+      "combined": 73510.0,
+      "hedge_n": 153,
+      "hedge_wr": 65.4
     }
+  },
+  "per_stream_hedge_cfg": {
+    "S1": {
+      "type": "stop-extension",
+      "ext_pts": 100,
+      "tp_mult": 3.0,
+      "sl_mult": 1.0
+    },
+    "S2": {
+      "type": "stop-extension",
+      "ext_pts": 100,
+      "tp_mult": 3.0,
+      "sl_mult": 1.0
+    },
+    "S3": {
+      "type": "stop-extension",
+      "ext_pts": 100,
+      "tp_mult": 3.0,
+      "sl_mult": 1.0
+    },
+    "S4": {
+      "type": "stop-extension",
+      "ext_pts": 100,
+      "tp_mult": 3.0,
+      "sl_mult": 1.0
+    },
+    "S5": {
+      "type": "stop-extension",
+      "ext_pts": 100,
+      "tp_mult": 3.0,
+      "sl_mult": 1.0
+    },
+    "S6": {
+      "type": "stop-extension",
+      "ext_pts": 100,
+      "tp_mult": 3.0,
+      "sl_mult": 1.0
+    }
+  },
+  "global_hedge_cfg": {
+    "type": "stop-extension",
+    "expire_minutes": 240,
+    "max_seconds_after_entry": 1800,
+    "ext_pts": 100,
+    "tp_mult": 3.0,
+    "sl_mult": 1.0
   }
 }
