@@ -1,0 +1,162 @@
+{
+  "saved_at": "2026-05-24T08:27:40+00:00",
+  "setfile": "dt818_pro_v5_9pct_may23_may16.set",
+  "method": "view_c_decay_adjusted_v5_parents_only",
+  "deposit_sim": 10000.0,
+  "baseline_balance": 71539.25,
+  "balance_multiplier": 1.0,
+  "spread_pts": 30,
+  "decay_factor": 0.9,
+  "live_haircut_np": 0.94,
+  "combined_haircut": 0.846,
+  "avg_oos_slope_pct": 115.91353558516903,
+  "per_stream_slopes_pct": {
+    "ORB_S1": 125.15942028985583,
+    "ORB_S2": 91.81300687927626,
+    "ORB_S3": 133.5536398467438,
+    "ORB_S4": 106.60731948565942,
+    "ORB_S5": 122.81003937007948,
+    "ORB_S6": 115.53778763939934
+  },
+  "sanity_window": {
+    "start": "2026-02-14",
+    "end": "2026-05-23",
+    "iso_weeks": 14
+  },
+  "raw_sim": {
+    "portfolio_np": 263547.0,
+    "dd_pct": 5.1001,
+    "dd_abs": 14279.6,
+    "ndd": 18.4562,
+    "pf": 2.2895,
+    "trades": 2122,
+    "wr": 56.9746
+  },
+  "weekly_live": {
+    "mean_np": 16136,
+    "median_np": 10476,
+    "p10_np": 4469,
+    "p90_np": 32432,
+    "worst_np": 232,
+    "best_np": 60144,
+    "std_np": 15112,
+    "green_week_prob": 1.0,
+    "expected_roi_pct": 22.56,
+    "n_sample_weeks": 14,
+    "view_c_planning_range_low": 8875,
+    "view_c_planning_range_high": 17750,
+    "view_c_tolerance_red_usd": -11941,
+    "parent_contribution_mean_np": 16136,
+    "hedge_contribution_mean_np": 0,
+    "hedge_share_pct": 0.0,
+    "target_balance_floor": 76008,
+    "target_balance_mean": 87675,
+    "target_balance_stretch": 103971
+  },
+  "daily_live": {
+    "mean_np": 3227,
+    "p10_np": 894,
+    "p90_np": 6486,
+    "expected_roi_pct": 4.51,
+    "parent_contribution_mean": 3227,
+    "hedge_contribution_mean": 0,
+    "target_balance_floor": 72433,
+    "target_balance_mean": 74766,
+    "target_balance_stretch": 78026
+  },
+  "tolerance": {
+    "single_week_red_usd": -14087.46,
+    "consecutive_red_weeks": 2,
+    "daily_outlier_red_usd": -2817.49,
+    "four_week_trailing_mean_floor": 5647.68,
+    "investigation_triggers": [
+      "single week NP < single_week_red_usd",
+      "2+ consecutive red weeks",
+      "4-week trailing mean < four_week_trailing_mean_floor",
+      "weekly ROI < 5% sustained for 3 weeks"
+    ]
+  },
+  "notes": [
+    "2026-05-23 14:50 UTC: corrupted projection (baseline=4.33 after cron overwrite at 06:15) recovered; baseline reset to live $71,539.25 prior to MAY23 reopt update.",
+    "2026-05-23 MAY23 reopt: setfile v4_9pct_may23_may16 (S1-3=MAY16 R2-R4, S4-6=MAY23 R1-R3). Parent boundary-accepted (SL=400 RR=2.0 grid floor). Hedge P0 FAIL (slope -108%, best-of-failed). Tolerance triggers rescaled to live $71,539 baseline.",
+    "2026-05-23: added target_balance_{floor,mean,stretch} to weekly_live + daily_live + new monthly_live block (4w compound).",
+    "2026-05-23: promoted target_balance_{floor,mean,stretch} to top-level (multiple naming variants) so dashboard ingest flatten-whitelist picks them up.",
+    "2026-05-24: v5 setfile (no rotation, fractal_confirm=true, hedges DISABLED). Parents from WFO expire-extend top-6 + rank#7 substitution for S6. v5 hedge WFO failed decay-filter on recent tape; ship parents-only. Projection sim 98d at 1.5%/stream 30pt: NP=$+263,547 NP/DD$=18.46. Method: view_c_decay_adjusted_v5_parents_only.",
+    "2026-05-24: v5 setfile (no rotation, fractal_confirm=true, hedges DISABLED). Parents from WFO expire-extend top-6 + rank#7 substitution for S6. v5 hedge WFO failed decay-filter on recent tape; ship parents-only. Projection sim 98d at 1.5%/stream 30pt: NP=$+263,547 NP/DD$=18.46. Method: view_c_decay_adjusted_v5_parents_only."
+  ],
+  "ea": "DT818_pro_v5.mq5",
+  "ea_version": "v5 V2 fractal-confirmed entry (no rotation; hedges disabled, MAY23 reopt 2026-05-24)",
+  "wfo_log_source": "C:\\Users\\Zhu-En\\zgb-opti\\output\\wfo_orb_v5_expire_extend\\oos_rank.csv",
+  "monthly_live": {
+    "horizon_weeks": 4,
+    "compound_mean_roi_pct": 125.6,
+    "target_balance_floor": 91162.09,
+    "target_balance_mean": 161390.97,
+    "target_balance_stretch": 319166.2
+  },
+  "weekly_target_balance_floor": 76008,
+  "weekly_target_balance_mean": 87675,
+  "weekly_target_balance_stretch": 103971,
+  "daily_target_balance_floor": 72433,
+  "daily_target_balance_mean": 74766,
+  "daily_target_balance_stretch": 78026,
+  "monthly_target_balance_floor": 91162.09,
+  "monthly_target_balance_mean": 161390.97,
+  "monthly_target_balance_stretch": 319166.2,
+  "monthly_compound_mean_roi_pct": 125.6,
+  "target_balance_floor": 76008,
+  "target_balance_mean": 87675,
+  "target_balance_stretch": 103971,
+  "raw_sim_98d": {
+    "v5_no_hedge_np": 263547.0,
+    "v5_dd_pct": 5.1,
+    "v5_ndd": 18.46,
+    "v5_pf": 2.29,
+    "v5_trades": 2122,
+    "compound_weekly_rate_v5": 0.266616495684864
+  },
+  "per_stream_sim_contribution_98d_71539usd": {
+    "S1": {
+      "parent_np": 43189.0,
+      "hedge_np": 0.0,
+      "combined": 43189.0,
+      "hedge_n": 0,
+      "hedge_wr": 0.0
+    },
+    "S2": {
+      "parent_np": 53109.0,
+      "hedge_np": 0.0,
+      "combined": 53109.0,
+      "hedge_n": 0,
+      "hedge_wr": 0.0
+    },
+    "S3": {
+      "parent_np": 38305.0,
+      "hedge_np": 0.0,
+      "combined": 38305.0,
+      "hedge_n": 0,
+      "hedge_wr": 0.0
+    },
+    "S4": {
+      "parent_np": 34098.0,
+      "hedge_np": 0.0,
+      "combined": 34098.0,
+      "hedge_n": 0,
+      "hedge_wr": 0.0
+    },
+    "S5": {
+      "parent_np": 28862.0,
+      "hedge_np": 0.0,
+      "combined": 28862.0,
+      "hedge_n": 0,
+      "hedge_wr": 0.0
+    },
+    "S6": {
+      "parent_np": 65984.0,
+      "hedge_np": 0.0,
+      "combined": 65984.0,
+      "hedge_n": 0,
+      "hedge_wr": 0.0
+    }
+  }
+}
