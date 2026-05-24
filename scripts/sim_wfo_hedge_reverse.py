@@ -92,6 +92,15 @@ class ReverseHedgeCfg:
     # Rationale: skip "retrace immediately, continue against the hedge" fills.
     fractal_confirm: bool = False
     fractal_width: int = 5
+    # 2026-05-24 PT2: multi-tier LIMITs to catch shallow retracements.
+    # When tier_count > 1, total lots split N ways across tiers:
+    #   Tier k (1-indexed) entry = parent_entry + sign × (k-1) × tier_spacing × parent_SL_dist
+    #   where sign = -1 for parent BUY SL (SELL_LIMITs below entry catch shallower retraces)
+    #         sign = +1 for parent SELL SL (BUY_LIMITs above entry)
+    # Each tier is an independent LIMIT with its own SL/TP geometry (same alpha/pm).
+    # tier_count=1 + tier_spacing=0 = current single-LIMIT behavior.
+    tier_count: int = 1
+    tier_spacing: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -201,14 +210,159 @@ def simulate_reverse_hedges(sl_events, ticks_arr, stream_cfg: dict,
     tp2_dist_price = sl_dist_price * pm / (1.0 - alpha)
     out = []
 
+    n_tiers = max(1, hcfg.tier_count)
+    tier_spacing_price = hcfg.tier_spacing * sl_dist_price
+
     for ev in sl_events:
         sl_ts = ev["ts_ns"]
         direction = ev["direction"]
         entry_price = ev["entry_price"]
         # Risk-equalization: scale total hedge lots by 1/sl_mult to match parent $-risk.
-        lots_total = ev["lots"] / hcfg.sl_mult
-        lots_stage1 = lots_total * alpha
-        lots_stage2 = lots_total * (1.0 - alpha)
+        # Multi-tier: split lots evenly across tiers (each tier is independent LIMIT with own SL/TP).
+        base_lots = ev["lots"] / hcfg.sl_mult
+        lots_per_tier = base_lots / n_tiers
+        lots_stage1 = lots_per_tier * alpha
+        lots_stage2 = lots_per_tier * (1.0 - alpha)
+
+        # F1 filter (event-level)
+        if hcfg.f1_sec > 0:
+            elapsed_s = (sl_ts - ev["entry_ts_ns"]) / 1_000_000_000
+            if elapsed_s > hcfg.f1_sec:
+                continue
+
+        # Regime gate (event-level)
+        if hcfg.regime_gate != "off":
+            date_iso, sess = event_session(sl_ts)
+            regime = regime_by_session.get((date_iso, sess), "UNKNOWN")
+            if not regime_allowed(regime, hcfg.regime_gate):
+                continue
+
+        # Multi-tier LIMITs: tier k (0-indexed) entry offset by -direction*k*spacing*sl_dist
+        # For parent BUY (direction=+1), tier 2 entry is BELOW parent entry (SELL_LIMIT
+        # fills on shallower upward retracement). Same logic mirrored for parent SELL.
+        for k in range(n_tiers):
+            tier_entry = entry_price - direction * k * tier_spacing_price
+
+            # Geometry per tier
+            if direction == 1:    # parent BUY SL'd → SELL_LIMIT hedge
+                hedge_dir = -1
+                hedge_entry = tier_entry
+                hedge_sl = hedge_entry + sl_dist_price
+                hedge_tp1 = hedge_entry - tp1_dist_price
+                hedge_tp2 = hedge_entry - tp2_dist_price
+            else:                  # parent SELL SL'd → BUY_LIMIT hedge
+                hedge_dir = 1
+                hedge_entry = tier_entry
+                hedge_sl = hedge_entry - sl_dist_price
+                hedge_tp1 = hedge_entry + tp1_dist_price
+                hedge_tp2 = hedge_entry + tp2_dist_price
+
+            # Fractal-confirm gate (per-tier — each LIMIT armed independently)
+            arm_ts = sl_ts
+            if hcfg.fractal_confirm and fractal_cache is not None:
+                window_end = sl_ts + expire_ns
+                if hedge_dir == -1:
+                    ts_arr_f = fractal_cache["up_ts"]
+                    pr_arr_f = fractal_cache["up_price"]
+                    mask = (ts_arr_f > sl_ts) & (ts_arr_f <= window_end) & (pr_arr_f >= hedge_entry)
+                else:
+                    ts_arr_f = fractal_cache["dn_ts"]
+                    pr_arr_f = fractal_cache["dn_price"]
+                    mask = (ts_arr_f > sl_ts) & (ts_arr_f <= window_end) & (pr_arr_f <= hedge_entry)
+                if not mask.any():
+                    continue   # skip this tier; other tiers may still fire
+                arm_ts = int(ts_arr_f[mask].min())
+
+            i0 = np.searchsorted(ts_arr, arm_ts)
+            i1 = np.searchsorted(ts_arr, sl_ts + expire_ns)
+            if i1 <= i0:
+                continue
+
+            if hedge_dir == -1:
+                hits = np.where(bid[i0:i1] >= hedge_entry)[0]
+            else:
+                hits = np.where(ask[i0:i1] <= hedge_entry)[0]
+            if len(hits) == 0:
+                continue
+            ent_idx = i0 + hits[0]
+            ent_ts = ts_arr[ent_idx]
+            i_end = np.searchsorted(ts_arr, ent_ts + walk_max_ns)
+            post_bid = bid[ent_idx + 1: i_end]
+            post_ask = ask[ent_idx + 1: i_end]
+            if len(post_bid) == 0:
+                continue
+
+            if hedge_dir == -1:
+                sl_h = np.where(post_ask >= hedge_sl)[0]
+                tp1_h = np.where(post_bid <= hedge_tp1)[0]
+                tp2_h = np.where(post_bid <= hedge_tp2)[0]
+            else:
+                sl_h = np.where(post_bid <= hedge_sl)[0]
+                tp1_h = np.where(post_ask >= hedge_tp1)[0]
+                tp2_h = np.where(post_ask >= hedge_tp2)[0]
+            sl_first = sl_h[0] if len(sl_h) else 10**18
+            tp1_first = tp1_h[0] if len(tp1_h) else 10**18
+            tp2_first = tp2_h[0] if len(tp2_h) else 10**18
+
+            # Stage 1: exit = first of (TP1, SL)
+            if tp1_first < sl_first:
+                ex1_px = hedge_tp1; ex1_idx = ent_idx + 1 + tp1_first
+            elif sl_first < 10**18:
+                ex1_px = hedge_sl;  ex1_idx = ent_idx + 1 + sl_first
+            else:
+                continue
+            pnl1 = hedge_dir * (ex1_px - hedge_entry) * CONTRACT * lots_stage1
+            out.append((int(ts_arr[ex1_idx]), float(pnl1)))
+
+            # Stage 2: exit = first of (TP2, SL)
+            if tp2_first < sl_first:
+                ex2_px = hedge_tp2; ex2_idx = ent_idx + 1 + tp2_first
+            elif sl_first < 10**18:
+                ex2_px = hedge_sl;  ex2_idx = ent_idx + 1 + sl_first
+            else:
+                continue
+            pnl2 = hedge_dir * (ex2_px - hedge_entry) * CONTRACT * lots_stage2
+            out.append((int(ts_arr[ex2_idx]), float(pnl2)))
+    return out
+
+
+@dataclass(frozen=True)
+class StopExtensionCfg:
+    """2026-05-24: STOP-on-extension hedge variant.
+
+    Instead of LIMIT-at-entry (wait for retracement), place STOP further in
+    continuation direction (chase the trend). Bet: parent SL was real and
+    price will continue past parent_SL_price by ext_pts more.
+
+    Note: ORB strategy already has a symmetric opposite-direction STOP at
+    range break — this may be partly redundant. Worth testing to quantify.
+    """
+    exp_min: int            # expire_minutes for the STOP
+    f1_sec: int             # F1 filter on parent SL
+    ext_pts: int            # how far past parent_SL_price to place the STOP
+    tp_mult: float          # TP = ext_pts * tp_mult (single TP, no smart-TP split)
+    sl_mult: float          # hedge SL distance = parent_SL_pts * sl_mult
+
+
+def simulate_stop_extension_hedges(sl_events, ticks_arr, stream_cfg: dict,
+                                     hcfg: StopExtensionCfg) -> list:
+    """STOP-on-extension hedge. Returns list of (exit_ts_ns, pnl)."""
+    ts_arr = ticks_arr["ts_ns"]; bid = ticks_arr["bid"]; ask = ticks_arr["ask"]
+    expire_ns = int(hcfg.exp_min * 60 * 1_000_000_000)
+    walk_max_ns = int(3 * 24 * 3600 * 1_000_000_000)
+    parent_sl_dist_pts = stream_cfg["fixed_sl_pts"]
+    parent_sl_dist_price = parent_sl_dist_pts * POINT
+    ext_price = hcfg.ext_pts * POINT
+    hedge_sl_dist_price = parent_sl_dist_price * hcfg.sl_mult
+    tp_dist_price = ext_price * hcfg.tp_mult if hcfg.tp_mult > 0 else parent_sl_dist_price * hcfg.tp_mult
+    out = []
+
+    for ev in sl_events:
+        sl_ts = ev["ts_ns"]
+        direction = ev["direction"]
+        entry_price = ev["entry_price"]
+        # Risk-equalized lots
+        lots = ev["lots"] / hcfg.sl_mult
 
         # F1 filter
         if hcfg.f1_sec > 0:
@@ -216,58 +370,34 @@ def simulate_reverse_hedges(sl_events, ticks_arr, stream_cfg: dict,
             if elapsed_s > hcfg.f1_sec:
                 continue
 
-        # Regime gate
-        if hcfg.regime_gate != "off":
-            date_iso, sess = event_session(sl_ts)
-            regime = regime_by_session.get((date_iso, sess), "UNKNOWN")
-            if not regime_allowed(regime, hcfg.regime_gate):
-                continue
-
-        # Geometry: both LIMITs at parent entry_price, shared SL, separate TPs.
-        if direction == 1:    # parent BUY SL'd → SELL_LIMIT hedges (TPs below entry)
+        # Parent SL price = entry ± parent_sl_dist (depends on parent direction)
+        # Parent BUY: SL is BELOW entry, at entry - parent_sl_dist_price
+        # Parent SELL: SL is ABOVE entry, at entry + parent_sl_dist_price
+        # Continuation direction = SAME as where parent SL'd (down for BUY parent, up for SELL parent)
+        if direction == 1:    # parent BUY → continuation is DOWN → SELL_STOP below parent SL
+            parent_sl_px = entry_price - parent_sl_dist_price
             hedge_dir = -1
-            hedge_entry = entry_price
-            hedge_sl = hedge_entry + sl_dist_price
-            hedge_tp1 = hedge_entry - tp1_dist_price
-            hedge_tp2 = hedge_entry - tp2_dist_price
-        else:                  # parent SELL SL'd → BUY_LIMIT hedges (TPs above entry)
+            hedge_entry = parent_sl_px - ext_price       # need price to fall MORE to fill
+            hedge_sl = hedge_entry + hedge_sl_dist_price  # SL ABOVE entry (against the SELL)
+            hedge_tp = hedge_entry - tp_dist_price        # TP BELOW entry (in direction of continuation)
+        else:                  # parent SELL → continuation is UP → BUY_STOP above parent SL
+            parent_sl_px = entry_price + parent_sl_dist_price
             hedge_dir = 1
-            hedge_entry = entry_price
-            hedge_sl = hedge_entry - sl_dist_price
-            hedge_tp1 = hedge_entry + tp1_dist_price
-            hedge_tp2 = hedge_entry + tp2_dist_price
+            hedge_entry = parent_sl_px + ext_price
+            hedge_sl = hedge_entry - hedge_sl_dist_price
+            hedge_tp = hedge_entry + tp_dist_price
 
-        # 2026-05-24: optional fractal-confirm gate. Delays LIMIT arming until
-        # a same-momentum fractal confirms past entry. For parent BUY SL'd
-        # (hedge_dir=-1, SELL_LIMIT at entry above current), we want an
-        # UP-fractal with high >= entry confirmed in (sl_ts, sl_ts + expire].
-        # For parent SELL SL'd (hedge_dir=1, BUY_LIMIT at entry below current),
-        # we want a DOWN-fractal with low <= entry.
-        arm_ts = sl_ts
-        if hcfg.fractal_confirm and fractal_cache is not None:
-            window_end = sl_ts + expire_ns
-            if hedge_dir == -1:
-                ts_arr_f = fractal_cache["up_ts"]
-                pr_arr_f = fractal_cache["up_price"]
-                mask = (ts_arr_f > sl_ts) & (ts_arr_f <= window_end) & (pr_arr_f >= hedge_entry)
-            else:
-                ts_arr_f = fractal_cache["dn_ts"]
-                pr_arr_f = fractal_cache["dn_price"]
-                mask = (ts_arr_f > sl_ts) & (ts_arr_f <= window_end) & (pr_arr_f <= hedge_entry)
-            if not mask.any():
-                continue   # no qualifying fractal in window → skip hedge entirely
-            arm_ts = int(ts_arr_f[mask].min())
-
-        # Pending lifecycle: LIMIT trigger window starts at arm_ts (= sl_ts when no fractal gate)
-        i0 = np.searchsorted(ts_arr, arm_ts)
+        # Pending lifecycle
+        i0 = np.searchsorted(ts_arr, sl_ts)
         i1 = np.searchsorted(ts_arr, sl_ts + expire_ns)
         if i1 <= i0:
             continue
 
+        # STOP trigger: BUY_STOP fills when ask >= entry; SELL_STOP fills when bid <= entry
         if hedge_dir == -1:
-            hits = np.where(bid[i0:i1] >= hedge_entry)[0]
+            hits = np.where(bid[i0:i1] <= hedge_entry)[0]
         else:
-            hits = np.where(ask[i0:i1] <= hedge_entry)[0]
+            hits = np.where(ask[i0:i1] >= hedge_entry)[0]
         if len(hits) == 0:
             continue
         ent_idx = i0 + hits[0]
@@ -278,40 +408,22 @@ def simulate_reverse_hedges(sl_events, ticks_arr, stream_cfg: dict,
         if len(post_bid) == 0:
             continue
 
-        # SL hit index (shared by both stages — same SL price)
-        # TP1 hit index (stage 1, shallower) + TP2 hit index (stage 2, deeper)
-        if hedge_dir == -1:  # SELL position: SL when ask >= sl, TP when bid <= tp
+        if hedge_dir == -1:
             sl_h = np.where(post_ask >= hedge_sl)[0]
-            tp1_h = np.where(post_bid <= hedge_tp1)[0]
-            tp2_h = np.where(post_bid <= hedge_tp2)[0]
-        else:                 # BUY position: SL when bid <= sl, TP when ask >= tp
+            tp_h = np.where(post_bid <= hedge_tp)[0]
+        else:
             sl_h = np.where(post_bid <= hedge_sl)[0]
-            tp1_h = np.where(post_ask >= hedge_tp1)[0]
-            tp2_h = np.where(post_ask >= hedge_tp2)[0]
+            tp_h = np.where(post_ask >= hedge_tp)[0]
         sl_first = sl_h[0] if len(sl_h) else 10**18
-        tp1_first = tp1_h[0] if len(tp1_h) else 10**18
-        tp2_first = tp2_h[0] if len(tp2_h) else 10**18
-
-        # Resolve each stage independently — each is its own LIMIT order.
-        # Stage 1: exit = whichever of (TP1, SL) comes first
-        if tp1_first < sl_first:
-            ex1_px = hedge_tp1; ex1_idx = ent_idx + 1 + tp1_first
-        elif sl_first < 10**18:
-            ex1_px = hedge_sl;  ex1_idx = ent_idx + 1 + sl_first
-        else:
-            continue   # neither fired within walk-window
-        pnl1 = hedge_dir * (ex1_px - hedge_entry) * CONTRACT * lots_stage1
-        out.append((int(ts_arr[ex1_idx]), float(pnl1)))
-
-        # Stage 2: exit = whichever of (TP2, SL) comes first
-        if tp2_first < sl_first:
-            ex2_px = hedge_tp2; ex2_idx = ent_idx + 1 + tp2_first
-        elif sl_first < 10**18:
-            ex2_px = hedge_sl;  ex2_idx = ent_idx + 1 + sl_first
-        else:
+        tp_first = tp_h[0] if len(tp_h) else 10**18
+        if sl_first == 10**18 and tp_first == 10**18:
             continue
-        pnl2 = hedge_dir * (ex2_px - hedge_entry) * CONTRACT * lots_stage2
-        out.append((int(ts_arr[ex2_idx]), float(pnl2)))
+        if tp_first < sl_first:
+            ex_px = hedge_tp; ex_idx = ent_idx + 1 + tp_first
+        else:
+            ex_px = hedge_sl; ex_idx = ent_idx + 1 + sl_first
+        pnl = hedge_dir * (ex_px - hedge_entry) * CONTRACT * lots
+        out.append((int(ts_arr[ex_idx]), float(pnl)))
     return out
 
 
