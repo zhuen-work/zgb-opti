@@ -50,16 +50,25 @@ SPREAD = 30   # 2026-05-16: bumped 23->30 per user "all live = 30pt moving forwa
 POINT = 0.01
 CONTRACT = 100
 
-# v2.1 parent params — copy from production setfile dt818_pro_v2.1_9pct_may16_may9.set.
-# Rotation 2026-05-16: S1-3 = MAY9 winners (prev week), S4-6 = MAY16 winners (curr week).
-# LDN=4 in setfile (real UTC); tick parquets are broker-time-labeled so use 7 here.
+# Parent params — copy from production setfile.
+# Rotation 2026-05-23: S1-3 = MAY16 winners (prev week, was S4-6); S4-6 = MAY23 winners (curr week).
+# 2026-05-24: NO MORE ROTATION (per [[feedback_no_rotation_use_top6]]).
+# All 6 streams come from a single WFO: output/wfo_orb_v5_expire_extend/oos_rank.csv
+# (v5 EA, fractal_confirm=True, fractal_width=5, may23 windows, expire grid extended).
+# Substituted rank#6 (Exp=1440, extreme) with rank#7 (Exp=720, saner). All Range=90.
 STREAM_CFGS = {
-    "S1": dict(range_minutes=90, fixed_sl_pts=700, rr_ratio=2.5, half_tp_ratio=0.4),   # MAY9 R1
-    "S2": dict(range_minutes=90, fixed_sl_pts=550, rr_ratio=3.5, half_tp_ratio=0.2),   # MAY9 R2
-    "S3": dict(range_minutes=90, fixed_sl_pts=400, rr_ratio=4.0, half_tp_ratio=0.6),   # MAY9 R3
-    "S4": dict(range_minutes=90, fixed_sl_pts=550, rr_ratio=4.0, half_tp_ratio=0.4),   # MAY16 R2 (R1 dedup-skipped)
-    "S5": dict(range_minutes=90, fixed_sl_pts=550, rr_ratio=3.5, half_tp_ratio=0.4),   # MAY16 R3
-    "S6": dict(range_minutes=90, fixed_sl_pts=550, rr_ratio=3.0, half_tp_ratio=0.4),   # MAY16 R4 (R5 dedup-skipped)
+    "S1": dict(range_minutes=90, fixed_sl_pts=550, rr_ratio=4.0, half_tp_ratio=0.2,
+               pending_expire_minutes=720,  fractal_confirm=True, fractal_width=5),   # WFO rank#1 4/4 NP/DD$=3875
+    "S2": dict(range_minutes=90, fixed_sl_pts=400, rr_ratio=3.5, half_tp_ratio=0.4,
+               pending_expire_minutes=240,  fractal_confirm=True, fractal_width=5),   # WFO rank#2 4/4 NP/DD$=3498
+    "S3": dict(range_minutes=90, fixed_sl_pts=550, rr_ratio=4.0, half_tp_ratio=0.2,
+               pending_expire_minutes=480,  fractal_confirm=True, fractal_width=5),   # WFO rank#3 4/4 NP/DD$=4039
+    "S4": dict(range_minutes=90, fixed_sl_pts=550, rr_ratio=4.0, half_tp_ratio=0.2,
+               pending_expire_minutes=240,  fractal_confirm=True, fractal_width=5),   # WFO rank#4 4/4 NP/DD$=3587
+    "S5": dict(range_minutes=90, fixed_sl_pts=550, rr_ratio=2.0, half_tp_ratio=0.4,
+               pending_expire_minutes=720,  fractal_confirm=True, fractal_width=5),   # WFO rank#5 4/4 NP/DD$=3632
+    "S6": dict(range_minutes=90, fixed_sl_pts=400, rr_ratio=3.5, half_tp_ratio=0.4,
+               pending_expire_minutes=720,  fractal_confirm=True, fractal_width=5),   # WFO rank#7 3/4 NP/DD$=3713 (substituted from rank#6 Exp=1440)
 }
 
 # Retry hedge grid (v2: A + B per user request 2026-05-12)
@@ -93,10 +102,12 @@ def make_stream_cfg(stream: str, risk_pct: float) -> ORBConfig:
         fixed_sl_pts=sc["fixed_sl_pts"],
         rr_ratio=sc["rr_ratio"],
         half_tp_ratio=sc["half_tp_ratio"],
-        pending_expire_minutes=240,
+        pending_expire_minutes=sc.get("pending_expire_minutes", 240),
         daily_target_pct=0.0, daily_loss_pct=0.0,
         ldn_enabled=True, ldn_start_hour=7,
         ny_enabled=True, ny_start_hour=13,
+        fractal_confirm=sc.get("fractal_confirm", False),
+        fractal_width=sc.get("fractal_width", 5),
         comment=stream,
     )
 

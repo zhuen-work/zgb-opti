@@ -1,0 +1,60 @@
+==============================================================================================================
+  REVERSE-HEDGE WFO (global exp_min/f1_sec/regime_gate, per-stream sl_mult/partial_fraction/profit_mult)
+  Windows: MAY23 (4 folds, IS+OOS each)
+  Grid: sl(6) × valid_pm_alpha_pairs(20) per-stream  ×  exp(1) × f1(1) × gate(1) global
+  Globals = 1.  Per-stream sims per window = 720
+==============================================================================================================
+
+  Data 2026-03-07->2026-05-23: ticks=35,916,317 M1=74,399 M5=14,904
+  W1 IS 2026-03-07->2026-04-04 done streams=6  [233s]
+  W1 OOS 2026-04-04->2026-04-18 done streams=6  [357s]
+  W2 IS 2026-03-21->2026-04-18 done streams=6  [574s]
+  W2 OOS 2026-04-18->2026-05-02 done streams=6  [671s]
+  W3 IS 2026-04-04->2026-05-02 done streams=6  [888s]
+  W3 OOS 2026-05-02->2026-05-16 done streams=6  [989s]
+  W4 IS 2026-04-18->2026-05-16 done streams=6  [1189s]
+  W4 OOS 2026-05-16->2026-05-23 done streams=6  [1210s]
+
+  Choosing per-stream (sl_mult, partial_fraction, profit_mult) for each global (exp, f1, gate)...
+
+=== PHASE D: Final Ranking (global reverse-hedge (MAY23)) - P0 enabled ===
+  Decay-aware filter: reject if OOS slope < -25%
+  Rank    P0  Prof        NP   AvgDD    NP/DD    Slope  OOS NPs
+  1     FAIL 3/4 $ +91,832  28.9%     +3182 -108.3%  $+38566 -> $+23017 -> $+33461 -> $-3212
+
+  P0 verdict: 0/1 candidates passed decay filter.
+  WARNING: No candidate passed -- using best-of-failed (top by NP/DD).
+
+=== BOUNDARY CHECK ===
+  Verify winner is not sitting at the edge of any swept param dim.
+  Dim                           Winner    GridMin    GridMax    N  Note
+
+  PASS: all swept dims interior to grid. No boundary truncation detected.
+
+  WINNER: exp_min=240  f1_sec=1800  regime_gate=off
+  Per-stream (sl_mult, partial_fraction, profit_mult):
+    S1: sl_mult=1.0  alpha=0.5  profit_mult=3.0
+    S2: sl_mult=1.0  alpha=0.5  profit_mult=3.0
+    S3: sl_mult=1.0  alpha=0.5  profit_mult=3.0
+    S4: sl_mult=1.2  alpha=0.5  profit_mult=3.5
+    S5: sl_mult=1.2  alpha=0.5  profit_mult=3.5
+    S6: sl_mult=1.2  alpha=0.5  profit_mult=3.5
+  Persisted: C:\Users\Zhu-En\zgb-opti\output\wfo_hedge_reverse_may23\winner.json
+
+==============================================================================================================
+  PORTFOLIO COMPARE  (MAY23)  $10k deposit, 1.5% per stream
+==============================================================================================================
+
+  Variant                NP    DD%  NP/DD$    PF  Trades
+  no-reverse     $ +59,045  8.47%   10.10  1.64    1468
+  +reverse       $ +81,819  9.67%    9.22  1.58    2644
+  delta          $ +22,774  +1.2p   -0.88
+
+  Per-stream reverse-hedge contribution (global exp=240 f1=1800 gate=off):
+  Stream  sl    alpha  pm     parent_NP parent_n     rev_NP  rev_n  rev_W
+  S1      1.0   0.5    3.0   $ +11,952      266 $  +4,202    220    30%
+  S2      1.0   0.5    3.0   $ +12,719      266 $  +4,790    210    31%
+  S3      1.0   0.5    3.0   $ +10,421      266 $  +4,362    204    31%
+  S4      1.2   0.5    3.5   $ +10,224      134 $  +3,568    118    27%
+  S5      1.2   0.5    3.5   $  +6,936      268 $  +3,062    226    27%
+  S6      1.2   0.5    3.5   $  +6,793      268 $  +2,790    198    27%

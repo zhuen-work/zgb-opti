@@ -1,0 +1,29 @@
+{
+  "expire_minutes": 240,
+  "max_seconds_after_entry": 1800,
+  "regime_gate": "off",
+  "per_stream_sl_mult": {
+    "S1": 1.0,
+    "S2": 1.2,
+    "S3": 1.0,
+    "S4": 1.0,
+    "S5": 1.0,
+    "S6": 1.2
+  },
+  "per_stream_partial_fraction": {
+    "S1": 0.5,
+    "S2": 0.5,
+    "S3": 0.5,
+    "S4": 0.5,
+    "S5": 0.5,
+    "S6": 0.5
+  },
+  "per_stream_profit_mult": {
+    "S1": 3.0,
+    "S2": 3.5,
+    "S3": 3.0,
+    "S4": 3.5,
+    "S5": 3.0,
+    "S6": 3.5
+  }
+}
