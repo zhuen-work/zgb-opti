@@ -122,14 +122,68 @@ def publish_projection(projection: Mapping[str, Any]) -> bool:
 def publish_friction(date: str, sim_np: float, live_np: float,
                       spread_pts: int | None = None, total_risk: float | None = None,
                       notes: str | None = None) -> bool:
-    """Post today's sim-vs-live friction row.
-    friction_pct = (sim - live) / max(abs(live), 1) * 100 (positive = sim optimistic)."""
-    denom = max(abs(live_np), 1.0)
+    """Post today's APPARENT friction row (sim_scaled vs live).
+
+    Vocabulary (standardized 2026-05-18):
+      "Friction"  = umbrella for sim-vs-live deviation
+      "Apparent"  = the metric this function publishes (mixed broker + structural)
+      "Slippage"  = pure broker SL-fill execution (see publish_slippage)
+
+    IMPORTANT: caller must pass sim_np ALREADY SCALED to live's balance anchor:
+        sim_scaled = sim_np_raw * (live_balance_anchor / sim_deposit)
+    where live_balance_anchor is the live balance at the start of the comparison
+    period (typically Monday-open). Without this scaling, the friction% is
+    meaningless because sim_np was computed on a $10k deposit while live_np is
+    on a $149k+ balance — direct comparison would give nonsensical values like
+    +94% when the real apples-to-apples apparent friction is +17%.
+
+    apparent_pct = (sim_scaled - live) / max(|sim_scaled|, 100) * 100
+    (positive = sim optimistic vs live. The $100 denom floor prevents blow-ups
+    when both legs are near zero.)
+
+    DB column name remains `friction_pct` for backward compat — value is
+    apparent friction. See project_live_vs_sim_calibration_log.md.
+
+    Refuses to publish when sim_np == 0 (treated as missing sim leg — without
+    a real sim baseline the denominator floor of $100 produces a meaningless
+    percent that scales with -live_np and shows up on the dashboard as e.g.
+    +4061% on a -$4k day).
+    """
+    if sim_np == 0.0:
+        print(f"[cf_publish] friction skipped: sim_np=0 (no sim baseline). "
+              f"live_np=${live_np:+,.0f} would produce a bogus % via denom floor.")
+        return False
+    denom = max(abs(sim_np), 100.0)
     friction_pct = (sim_np - live_np) / denom * 100.0
     return _post("/ingest/friction", {
         "date": date, "sim_np": sim_np, "live_np": live_np,
         "friction_pct": friction_pct, "spread_pts": spread_pts,
         "total_risk": total_risk, "notes": notes,
+    })
+
+
+def publish_slippage(date: str, slippage_pct: float, sl_trades: int,
+                      expected_loss_usd: float, actual_loss_usd: float,
+                      notes: str | None = None) -> bool:
+    """Post today's slippage-only friction (pure broker execution quality on SLs).
+
+    Lands in the same daily_friction row as publish_friction (worker uses UPSERT
+    with COALESCE on each field). If the apparent friction row doesn't exist yet,
+    the slippage record creates it with placeholder sim/live=0 values.
+
+    slippage_pct = (Σactual_$loss / Σexpected_$loss - 1) × 100
+    where expected_$loss per SL = lots × SL_pts × $1/pt (clean fill assumption).
+
+    Triggers calibration retune when 5-day rolling mean > 10% (see
+    project_live_vs_sim_calibration_log.md).
+    """
+    return _post("/ingest/friction", {
+        "date": date,
+        "slippage_pct": slippage_pct,
+        "sl_trades": sl_trades,
+        "expected_loss_usd": expected_loss_usd,
+        "actual_loss_usd": actual_loss_usd,
+        "notes": notes,
     })
 
 

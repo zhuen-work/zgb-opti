@@ -1,12 +1,13 @@
-"""OOS through today — 6-stream v2 rank portfolio.
+"""OOS through today — 6-stream v3 rank portfolio.
 
 Window: today (UTC) -> now.
-Streams (matches DT818_pro_v2 production):
-  S1-3 = PREVIOUS-week WFO top 3 (output/wfo_orb_may2)  magics 1111/2222/3333
-  S4-6 = CURRENT-week  WFO top 3 (output/wfo_orb_may9)  magics 4444/5555/6666
+Streams (matches DT818_pro_v3 production, params parsed from live setfile):
+  configs/sets/dt818_pro_v3_9pct_may16_may9.set
 
 Spread: 23pt (live calibration). Deposit: $10k.
-Risks: 3% / 6% / 9% total (matches dt818_pro_v2_{3,6,9}pct setfiles, per_stream = total/6).
+Risks: 3% / 6% / 9% total (per_stream = total/6).
+
+Parent ORB only (hedge contribution excluded — use sim_orb_oos_today_hedge.py for full v3).
 """
 from __future__ import annotations
 
@@ -24,14 +25,14 @@ from zgb_sim.tick_loader import symbol_meta, kill_mt5_terminal
 from zgb_sim.scalper_v1 import SymbolMeta
 from zgb_sim.orb import ORBConfig
 from zgb_sim.orb_fast import simulate_fast as orb_simulate
-from zgb_sim.wfo_helpers import (WINDOWS_MAY2, WINDOWS_MAY9, rank_with_p0)
-
 SYMBOL = "XAUUSD"
 LIVE_SYMBOL = None
 DEPOSIT = 10_000.0
-PREV_WFO_DIR = ROOT / "output" / "wfo_orb_may2"   # S1-3 source (previous week)
-CURR_WFO_DIR = ROOT / "output" / "wfo_orb_may9"   # S4-6 source (current week)
-SPREAD_LIVE = 23
+LIVE_SETFILE = ROOT / "configs" / "sets" / "dt818_pro_v3_9pct_may16_may9.set"
+# Per feedback_default_test_conditions.md (2026-05-16: "all live = 30pt moving
+# forward"). Was 23pt previously; 30pt is the calibration-tight conservative
+# pick vs Vantage gold spreads (median ~25pt, max ~32pt).
+SPREAD_LIVE = 30
 _now = datetime.now(timezone.utc)
 OOS_START = datetime(_now.year, _now.month, _now.day, tzinfo=timezone.utc)
 XAU_POINT = 0.01
@@ -205,40 +206,36 @@ def main() -> int:
     end = datetime.now(timezone.utc)
     days = (end - OOS_START).days
 
-    def load_top3(wfo_dir: Path, windows):
-        # Parquets either named is_{label}.parquet (may2) or p1_is_{label}.parquet (may9).
-        def _read(label):
-            for prefix in ("", "p1_"):
-                p_is = wfo_dir / f"{prefix}is_{label}.parquet"
-                p_oos = wfo_dir / f"{prefix}oos_{label}.parquet"
-                if p_is.exists() and p_oos.exists():
-                    return pd.read_parquet(p_is), pd.read_parquet(p_oos)
-            raise FileNotFoundError(f"No IS/OOS parquet for {label} in {wfo_dir}")
-        is_per, oos_per = {}, {}
-        for label, _, _, _, _ in windows:
-            is_per[label], oos_per[label] = _read(label)
-        cands = [row_to_cfg(r, "ORB", 3.0) for _, r in oos_per["W1"].iterrows()]
-        grid = [row_to_cfg(r, "ORB", 3.0) for _, r in is_per["W1"].iterrows()]
-        ranked = rank_with_p0(cands, oos_per, windows, decay_threshold=-0.25,
-                              grid_configs=grid, is_per_window=is_per)
-        return [ranked[i]["cfg"] for i in range(3)]
+    def parse_setfile(path: Path):
+        """Parse _ORB_S{i}_{Param}=val||... lines from EA setfile, return 6 row dicts."""
+        import re
+        text = path.read_text()
+        rows = []
+        for i in range(1, 7):
+            def _get(key):
+                m = re.search(rf"_ORB_S{i}_{key}=([^|]+)\|\|", text)
+                if not m:
+                    raise RuntimeError(f"S{i} {key} not found in {path}")
+                return m.group(1).strip()
+            rows.append({
+                "range_minutes": int(_get("RangeMinutes")),
+                "fixed_sl_pts": int(_get("FixedSL_Pts")),
+                "rr_ratio": float(_get("RR_Ratio")),
+                "half_tp_ratio": float(_get("HalfTP_Ratio")),
+                "daily_target_pct": 999.0,
+                "daily_loss_pct": 999.0,
+            })
+        return rows
 
-    prev_top3 = load_top3(PREV_WFO_DIR, WINDOWS_MAY2)   # S1-3
-    curr_top3 = load_top3(CURR_WFO_DIR, WINDOWS_MAY9)   # S4-6
-
-    def cfg_to_row(c):
-        return {"range_minutes": c.range_minutes, "fixed_sl_pts": c.fixed_sl_pts,
-                "rr_ratio": c.rr_ratio, "half_tp_ratio": c.half_tp_ratio,
-                "daily_target_pct": c.daily_target_pct, "daily_loss_pct": c.daily_loss_pct}
-    rows = [cfg_to_row(c) for c in (prev_top3 + curr_top3)]
+    rows = parse_setfile(LIVE_SETFILE)
     labels = ["S1", "S2", "S3", "S4", "S5", "S6"]
-    sources = ["MAY2 R1 (prev)", "MAY2 R2 (prev)", "MAY2 R3 (prev)",
-               "MAY9 R1 (curr)", "MAY9 R2 (curr)", "MAY9 R3 (curr)"]
+    sources = ["MAY9 R1", "MAY9 R2", "MAY9 R3",
+               "MAY16 R2", "MAY16 R3", "MAY16 R4"]  # per setfile header
 
     print("=" * 100)
-    print(f"  v2 6-stream OOS  |  {OOS_START.date()} -> {end.strftime('%Y-%m-%d %H:%M UTC')}  ({days}d)")
+    print(f"  v3 6-stream OOS  |  {OOS_START.date()} -> {end.strftime('%Y-%m-%d %H:%M UTC')}  ({days}d)")
     print(f"  Spread {SPREAD_LIVE}pt (live), $10k, total risk split N=6 (per_stream = total/6)")
-    print(f"  S1-3 = PREVIOUS week (wfo_orb_may2) | S4-6 = CURRENT week (wfo_orb_may9)")
+    print(f"  Setfile: {LIVE_SETFILE.name}")
     for lbl, src, r in zip(labels, sources, rows):
         print(f"    {lbl} ({src}): Range={r['range_minutes']} SL={r['fixed_sl_pts']} "
               f"RR={r['rr_ratio']} HTP={r['half_tp_ratio']}")
@@ -298,11 +295,17 @@ def main() -> int:
             import urllib.request as _u
             import os as _os
             today_d = datetime.now(timezone.utc).date()
-            sim_today = sum(row["pnl"] for d, row in by_day.items() if d == today_d)
-            # Pull today's live NP from the dashboard API.
+            sim_today_raw = sum(row["pnl"] for d, row in by_day.items() if d == today_d)
+            # Pull today's live NP + balance anchor from the dashboard API.
+            # cf_publish lazy-loads .env; call its loader first so direct
+            # os.environ reads below see the dotenv-loaded vars.
+            from zgb_sim.cf_publish import _load_dotenv as _cfp_load_dotenv
+            _cfp_load_dotenv()
             api = _os.environ.get("CONSOLE_API_BASE", "")
             tok = _os.environ.get("CONSOLE_READ_TOKEN", "") or _os.environ.get("CONSOLE_INGEST_TOKEN", "")
             live_today = 0.0
+            balance_anchor = 0.0
+            api_ok = False
             if api and tok:
                 req = _u.Request(api.rstrip("/") + "/api/today",
                                   headers={"Authorization": f"Bearer {tok}",
@@ -316,14 +319,45 @@ def main() -> int:
                 prod_magics = {1111, 2222, 3333, 4444, 5555, 6666}
                 live_today = sum(float(d.get("profit", 0))
                                   for d in today_deals if int(d.get("magic", 0)) in prod_magics)
+                # Balance anchor for scaling sim: prefer projection.baseline_balance
+                # (= week-start balance when projection was saved), fall back to
+                # current account.balance + |live_today| (rough estimate of period-start).
+                proj = body.get("projection") or {}
+                balance_anchor = float(proj.get("baseline_balance") or 0.0)
+                if balance_anchor <= 0:
+                    acct = body.get("account") or {}
+                    cur_bal = float(acct.get("balance") or 0.0)
+                    balance_anchor = cur_bal - live_today  # rough Mon-open
+                api_ok = True
+            # Scale sim to live's balance anchor. sim ran on DEPOSIT=$10k; live runs
+            # on ~$149k+. Without scaling, dollar comparison is meaningless (sim NP
+            # is ~15x smaller, producing nonsense friction% like +94%).
+            sim_scaled = sim_today_raw * (balance_anchor / DEPOSIT) if balance_anchor > 0 else sim_today_raw
             from zgb_sim.cf_publish import publish_friction
-            ok = publish_friction(
-                date=today_d.isoformat(), sim_np=float(sim_today), live_np=float(live_today),
-                spread_pts=int(SPREAD_LIVE), total_risk=9.0,
-                notes="sim_orb_oos_today vs live deals (prod magics)",
-            )
-            print(f"\n  [cf_publish] friction push: {'OK' if ok else 'FAIL'} "
-                  f"sim=${sim_today:+,.0f} live=${live_today:+,.0f}")
+            # Refuse to publish if API returned no parent deals yet (e.g., live_check
+            # hasn't run yet today). A 0 live_np with a non-zero sim would produce a
+            # nonsensical friction% and overwrite yesterday's valid record.
+            if api_ok and live_today == 0.0 and sim_today_raw != 0.0:
+                print(f"\n  [cf_publish] friction skipped: live=$0 (API has no parent deals "
+                      f"yet today). Run live_check.py first, then re-run this. "
+                      f"sim_raw=${sim_today_raw:+,.0f}")
+            elif sim_today_raw == 0.0:
+                print(f"\n  [cf_publish] friction skipped: sim_raw=$0 (no sim baseline). "
+                      f"Publishing would yield bogus % via denom floor. "
+                      f"live=${live_today:+,.0f}")
+            else:
+                ok = publish_friction(
+                    date=today_d.isoformat(),
+                    sim_np=float(sim_scaled),  # ALREADY SCALED to live balance
+                    live_np=float(live_today),
+                    spread_pts=int(SPREAD_LIVE), total_risk=9.0,
+                    notes=(f"sim_orb_oos_today vs live; sim_raw=${sim_today_raw:+,.0f} "
+                           f"scaled by balance_anchor=${balance_anchor:,.0f}/${DEPOSIT:,.0f}"),
+                )
+                print(f"\n  [cf_publish] friction push: {'OK' if ok else 'FAIL'} "
+                      f"sim_raw=${sim_today_raw:+,.0f} -> sim_scaled=${sim_scaled:+,.0f} "
+                      f"(anchor ${balance_anchor:,.0f}/${DEPOSIT:,.0f}), "
+                      f"live=${live_today:+,.0f}")
         except Exception as e:
             print(f"\n  [cf_publish] friction skipped: {type(e).__name__}: {e}")
     finally:
