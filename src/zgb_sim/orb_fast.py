@@ -118,6 +118,7 @@ def _run_sim(
     ma_trail_retrace_pct,           # float64: HWM retrace fraction to arm trail (0.0 = V1)
     sma_cross_exit,                 # bool: enable SMA(3)x(5) cross exit on M5 (V3)
     m5_cross_signal,                # int8[M]: +1 bullish / -1 bearish / 0 none per M5 bar
+    sess_cross_enabled,             # bool[n_sessions]: V4 ATR-gate result per session
 ):
     """JIT ORB sim. sess_* arrays pre-built; iterate ticks, fire on session end."""
     pend_kind = np.zeros(MAX_PENDING, dtype=np.int8)
@@ -733,6 +734,47 @@ def _build_sessions_arrays(
     return range_start_ns, range_end_ns, expire_ns, range_high, range_low
 
 
+def _build_sess_cross_enabled(
+    sess_range_end_ns: np.ndarray,
+    sess_range_high: np.ndarray,
+    sess_range_low: np.ndarray,
+    m5_ts_ns: np.ndarray,
+    m5_closes: np.ndarray,
+    point: float,
+    atr_gate: float,
+) -> np.ndarray:
+    """For each session, compute M5-ATR(14)/range_pts. Returns bool[n_sessions]
+    where True = atr_ratio > atr_gate. When atr_gate <= 0, all True."""
+    n = len(sess_range_end_ns)
+    out = np.zeros(n, dtype=np.bool_)
+    if atr_gate <= 0.0:
+        out[:] = True
+        return out
+    diffs = np.abs(np.diff(m5_closes))  # len = len(m5_closes) - 1
+    for si in range(n):
+        rh = sess_range_high[si]
+        rl = sess_range_low[si]
+        if rh <= 0 or rl <= 0:
+            out[si] = False
+            continue
+        range_pts = (rh - rl) / point
+        if range_pts <= 0:
+            out[si] = False
+            continue
+        end_ts = sess_range_end_ns[si]
+        FIVE_MIN_NS = np.int64(5 * 60 * 1_000_000_000)
+        cutoff = end_ts - FIVE_MIN_NS
+        idx_end = int(np.searchsorted(m5_ts_ns, cutoff, side='right'))
+        if idx_end < 15:
+            out[si] = False
+            continue
+        atr_in_price = float(np.mean(diffs[idx_end - 14:idx_end]))
+        atr_pts = atr_in_price / point
+        ratio = atr_pts / range_pts
+        out[si] = ratio > atr_gate
+    return out
+
+
 def simulate_fast(
     ticks: pd.DataFrame,
     m5_bars: pd.DataFrame,
@@ -828,6 +870,18 @@ def simulate_fast(
             # V3 on but no fractals at all → skip every session
             sess_skip[:] = True
 
+    # V4 ATR gate: per-session boolean array.
+    if bool(cfg.sma_cross_exit):
+        m5_closes = m5_bars["close"].values.astype(np.float64)
+        sess_cross_enabled = _build_sess_cross_enabled(
+            re_ns, rh_arr, rl_arr,
+            m5_ts_ns, m5_closes,
+            float(meta.point),
+            float(cfg.sma_cross_atr_gate),
+        )
+    else:
+        sess_cross_enabled = np.empty(0, dtype=np.bool_)
+
     deal_ts = np.zeros(MAX_DEALS, dtype=np.int64)
     deal_kind = np.zeros(MAX_DEALS, dtype=np.int8)
     deal_dir = np.zeros(MAX_DEALS, dtype=np.int8)
@@ -858,6 +912,7 @@ def simulate_fast(
         float(cfg.ma_trail_retrace_pct),
         bool(cfg.sma_cross_exit),
         m5_cross_signal,
+        sess_cross_enabled,
     )
 
     tp_count = sl_count = other_count = 0
