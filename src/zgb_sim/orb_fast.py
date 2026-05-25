@@ -433,11 +433,33 @@ def _run_sim(
                         upper += 1
                     pos_sl_trail_idx_up[i] = upper
 
+        # MA7 retrace-gate (V2): track HWM of unrealized profit per HTP-fired runner;
+        # arm the trail once current unrealized has retraced >= retrace_pct of HWM.
+        if ma_trail:
+            for i in range(MAX_POSITIONS):
+                if not pos_active[i] or not pos_is_runner[i] or not pos_htp_fired[i]:
+                    continue
+                close_px_i = bid if pos_dir[i] == 1 else ask
+                upnl = _pnl(pos_dir[i], pos_entry[i], close_px_i,
+                            pos_lots[i], tick_value, tick_size)
+                if upnl > pos_hwm_profit[i]:
+                    pos_hwm_profit[i] = upnl
+                if not pos_ma7_armed[i]:
+                    if ma_trail_retrace_pct <= 0.0:
+                        # V1 behavior: arm immediately.
+                        pos_ma7_armed[i] = True
+                    else:
+                        # Need positive HWM to compute meaningful retrace.
+                        if pos_hwm_profit[i] > 0.0:
+                            arm_threshold = pos_hwm_profit[i] * (1.0 - ma_trail_retrace_pct)
+                            if upnl <= arm_threshold:
+                                pos_ma7_armed[i] = True
+
         # MA7 post-HTP trail: ratchet runner SL toward SMA7 on closed M5 bars.
         # Runs on EXISTING positions before SL/TP check (matches fractal-trail order).
         if ma_trail and len(m5_close_ts) > 0:
             for i in range(MAX_POSITIONS):
-                if not pos_active[i] or not pos_is_runner[i] or not pos_htp_fired[i]:
+                if not pos_active[i] or not pos_is_runner[i] or not pos_ma7_armed[i]:
                     continue
                 # Advance index to the latest M5 bar with close_ts <= ts_ns.
                 idx = pos_ma7_last_idx[i]
