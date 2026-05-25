@@ -454,6 +454,19 @@ def _run_sim(
                             arm_threshold = pos_hwm_profit[i] * (1.0 - ma_trail_retrace_pct)
                             if upnl <= arm_threshold:
                                 pos_ma7_armed[i] = True
+                                # FIX: snap pos_ma7_last_idx to current M5 bar so the ratchet
+                                # only considers bars closing AFTER gate-arm-time (instead of
+                                # replaying queued bars from HTP-fire moment).
+                                if len(m5_close_ts) > 0:
+                                    lo = 0
+                                    hi = len(m5_close_ts)
+                                    while lo < hi:
+                                        mid = (lo + hi) // 2
+                                        if m5_close_ts[mid] < ts_ns:
+                                            lo = mid + 1
+                                        else:
+                                            hi = mid
+                                    pos_ma7_last_idx[i] = np.int64(lo)
 
         # MA7 post-HTP trail: ratchet runner SL toward SMA7 on closed M5 bars.
         # Runs on EXISTING positions before SL/TP check (matches fractal-trail order).
