@@ -496,6 +496,45 @@ def _run_sim(
                     idx += 1
                 pos_ma7_last_idx[i] = idx
 
+        # V3 cross-exit: close post-HTP runners on opposite-direction SMA(3)x(5)
+        # cross while in profit. One-shot per cross-bar; processed before SL/TP check.
+        if sma_cross_exit and len(m5_close_ts) > 0:
+            for i in range(MAX_POSITIONS):
+                if not pos_active[i] or not pos_is_runner[i] or not pos_htp_fired[i]:
+                    continue
+                idx = pos_cross_last_idx[i]
+                closed_here = False
+                while idx < len(m5_close_ts) and m5_close_ts[idx] <= ts_ns:
+                    sig = m5_cross_signal[idx]
+                    if sig != 0:
+                        # Side filter: bearish closes longs, bullish closes shorts.
+                        if (sig == -1 and pos_dir[i] == 1) or (sig == 1 and pos_dir[i] == -1):
+                            close_px = bid if pos_dir[i] == 1 else ask
+                            upnl = _pnl(pos_dir[i], pos_entry[i], close_px,
+                                        pos_lots[i], tick_value, tick_size)
+                            if upnl > 0.0:
+                                balance += upnl
+                                realized_today += upnl
+                                if deal_count < deal_ts.shape[0]:
+                                    deal_ts[deal_count] = ts_ns
+                                    deal_kind[deal_count] = D_OTHER
+                                    deal_dir[deal_count] = pos_dir[i]
+                                    deal_lots[deal_count] = pos_lots[i]
+                                    deal_price[deal_count] = close_px
+                                    deal_pnl[deal_count] = upnl
+                                    deal_count += 1
+                                if balance > balance_max:
+                                    balance_max = balance
+                                cur_dd = balance_max - balance
+                                if cur_dd > dd_abs:
+                                    dd_abs = cur_dd
+                                pos_active[i] = False
+                                closed_here = True
+                                break
+                    idx += 1
+                if not closed_here:
+                    pos_cross_last_idx[i] = idx
+
         # SL/TP on EXISTING positions
         for i in range(MAX_POSITIONS):
             if not pos_active[i]:
