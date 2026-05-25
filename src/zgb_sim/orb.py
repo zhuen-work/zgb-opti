@@ -72,6 +72,11 @@ class ORBConfig:
     # position switches its SL from the static value to SMA(7, close) on M5.
     # SL ratchets only in profit direction. No effect when half_tp_ratio == 0.
     ma_trail: bool = False
+    # Retrace-from-HWM gate for the MA7 trail.
+    # 0.0 = arm immediately on HTP fire (V1 behavior).
+    # >0 = arm only after current unrealized PnL has retraced by at least this
+    # fraction of HWM since HTP fired (e.g. 0.25 = wait for 25% giveback).
+    ma_trail_retrace_pct: float = 0.0
     comment: str = "ORB"
 
 
