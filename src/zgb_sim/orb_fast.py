@@ -113,6 +113,8 @@ def _run_sim(
     f_up_ts, f_up_pr,               # int64[k], float64[k]: up-fractals (sorted asc by ts)
     f_dn_ts, f_dn_pr,               # int64[k], float64[k]: dn-fractals (sorted asc by ts)
     v1, v2, v3,                     # bool flags
+    ma_trail,                       # bool: enable SMA(7) trail on runner post-HTP
+    m5_close_ts, m5_sma7,           # int64[M], float64[M]: close ts + SMA7 per M5 bar
 ):
     """JIT ORB sim. sess_* arrays pre-built; iterate ticks, fire on session end."""
     pend_kind = np.zeros(MAX_PENDING, dtype=np.int8)
@@ -664,6 +666,9 @@ def simulate_fast(
         f_up_ts, f_up_pr,
         f_dn_ts, f_dn_pr,
         v1, v2, v3,
+        False,
+        np.empty(0, dtype=np.int64),
+        np.empty(0, dtype=np.float64),
     )
 
     tp_count = sl_count = other_count = 0
