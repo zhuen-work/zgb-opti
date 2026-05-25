@@ -503,6 +503,13 @@ def _run_sim(
             for i in range(MAX_POSITIONS):
                 if not pos_active[i] or not pos_is_runner[i] or not pos_htp_fired[i]:
                     continue
+                # V4 regime gate: skip cross-exit for sessions disabled by ATR gate.
+                if len(sess_cross_enabled) > 0:
+                    sess_i = pos_session[i]
+                    if sess_i < 0 or sess_i >= len(sess_cross_enabled):
+                        continue
+                    if not sess_cross_enabled[sess_i]:
+                        continue
                 idx = pos_cross_last_idx[i]
                 closed_here = False
                 while idx < len(m5_close_ts) and m5_close_ts[idx] <= ts_ns:
