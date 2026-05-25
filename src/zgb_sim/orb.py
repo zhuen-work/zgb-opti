@@ -81,6 +81,11 @@ class ORBConfig:
     # When True, post-HTP runners close on opposite-direction cross while in profit.
     # Mutually exclusive with ma_trail (simulate_fast raises if both True).
     sma_cross_exit: bool = False
+    # ATR-based session regime gate for sma_cross_exit (V4).
+    # 0.0 = all sessions enabled (V3 behavior).
+    # >0 = enable cross-exit only for sessions where M5-ATR(14)/range_pts > gate.
+    # Higher value = restrict cross-exit to choppier sessions; clean trends bypass it.
+    sma_cross_atr_gate: float = 0.0
     comment: str = "ORB"
 
 
