@@ -116,6 +116,8 @@ def _run_sim(
     ma_trail,                       # bool: enable SMA(7) trail on runner post-HTP
     m5_close_ts, m5_sma7,           # int64[M], float64[M]: close ts + SMA7 per M5 bar
     ma_trail_retrace_pct,           # float64: HWM retrace fraction to arm trail (0.0 = V1)
+    sma_cross_exit,                 # bool: enable SMA(3)x(5) cross exit on M5 (V3)
+    m5_cross_signal,                # int8[M]: +1 bullish / -1 bearish / 0 none per M5 bar
 ):
     """JIT ORB sim. sess_* arrays pre-built; iterate ticks, fire on session end."""
     pend_kind = np.zeros(MAX_PENDING, dtype=np.int8)
@@ -151,6 +153,10 @@ def _run_sim(
     # Retrace-gate state for MA7 trail (V2)
     pos_hwm_profit = np.zeros(MAX_POSITIONS, dtype=np.float64)
     pos_ma7_armed = np.zeros(MAX_POSITIONS, dtype=np.bool_)
+
+    # V3 cross-exit state: per-runner index into m5_cross_signal so a single
+    # cross can't trigger more than once for the same runner.
+    pos_cross_last_idx = np.zeros(MAX_POSITIONS, dtype=np.int64)
 
     n_sess = sess_range_end_ns.shape[0]
     sess_fired = np.zeros(n_sess, dtype=np.bool_)
@@ -586,6 +592,7 @@ def _run_sim(
                     pos_ma7_last_idx[slot] = 0
                     pos_hwm_profit[slot] = 0.0
                     pos_ma7_armed[slot] = False
+                    pos_cross_last_idx[slot] = 0
                     if htp_ratio > 0:
                         # Search for sibling already-active position with same session+direction.
                         sib = -1
@@ -721,6 +728,21 @@ def simulate_fast(
         m5_close_ts = np.empty(0, dtype=np.int64)
         m5_sma7 = np.empty(0, dtype=np.float64)
 
+    # V3 cross-exit precompute (only when enabled).
+    if bool(cfg.sma_cross_exit) and bool(cfg.ma_trail):
+        raise ValueError(
+            "ORBConfig.ma_trail and sma_cross_exit are mutually exclusive; "
+            "set at most one to True.")
+    if bool(cfg.sma_cross_exit):
+        from .sma_cross import sma_cross_on_m5_closes
+        m5_close_ts_x, m5_cross_signal = sma_cross_on_m5_closes(m5_bars)
+        # If both V1 (ma_trail) and V3 are off (cross only), m5_close_ts wasn't
+        # computed above. Use the cross helper's close_ts (same M5 bars, same logic).
+        if not bool(cfg.ma_trail):
+            m5_close_ts = m5_close_ts_x
+    else:
+        m5_cross_signal = np.empty(0, dtype=np.int8)
+
     if len(tick_ts_ns) == 0:
         first_day = last_day = date.today()
     else:
@@ -795,6 +817,8 @@ def simulate_fast(
         bool(cfg.ma_trail),
         m5_close_ts, m5_sma7,
         float(cfg.ma_trail_retrace_pct),
+        bool(cfg.sma_cross_exit),
+        m5_cross_signal,
     )
 
     tp_count = sl_count = other_count = 0
