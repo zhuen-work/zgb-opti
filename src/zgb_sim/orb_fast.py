@@ -482,6 +482,28 @@ def _run_sim(
                 if cur_dd > dd_abs:
                     dd_abs = cur_dd
                 pos_active[i] = False
+                # MA7 trail: if a half-lot (non-runner) just hit TP, flag the sibling runner.
+                if htp_ratio > 0 and not pos_is_runner[i]:
+                    sess_i = pos_session[i]
+                    dir_i = pos_dir[i]
+                    for kk in range(MAX_POSITIONS):
+                        if (pos_active[kk]
+                                and pos_is_runner[kk]
+                                and pos_session[kk] == sess_i
+                                and pos_dir[kk] == dir_i):
+                            pos_htp_fired[kk] = True
+                            # Snap ma7_last_idx to the first M5 close at-or-after now,
+                            # so trail can't see pre-HTP-fire bars.
+                            if ma_trail:
+                                lo = 0
+                                hi = len(m5_close_ts)
+                                while lo < hi:
+                                    mid = (lo + hi) // 2
+                                    if m5_close_ts[mid] < ts_ns:
+                                        lo = mid + 1
+                                    else:
+                                        hi = mid
+                                pos_ma7_last_idx[kk] = np.int64(lo)
 
         # Add new positions (capture orig SL dist for BE trigger calc)
         for j in range(new_pos_count):
