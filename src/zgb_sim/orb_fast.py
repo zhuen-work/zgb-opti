@@ -428,6 +428,28 @@ def _run_sim(
                         upper += 1
                     pos_sl_trail_idx_up[i] = upper
 
+        # MA7 post-HTP trail: ratchet runner SL toward SMA7 on closed M5 bars.
+        # Runs on EXISTING positions before SL/TP check (matches fractal-trail order).
+        if ma_trail and len(m5_close_ts) > 0:
+            for i in range(MAX_POSITIONS):
+                if not pos_active[i] or not pos_is_runner[i] or not pos_htp_fired[i]:
+                    continue
+                # Advance index to the latest M5 bar with close_ts <= ts_ns.
+                idx = pos_ma7_last_idx[i]
+                while idx < len(m5_close_ts) and m5_close_ts[idx] <= ts_ns:
+                    sma_val = m5_sma7[idx]
+                    if not np.isnan(sma_val):
+                        if pos_dir[i] == 1:
+                            # BUY: raise SL toward sma7 if it improves.
+                            if sma_val > pos_sl[i]:
+                                pos_sl[i] = _norm_price(sma_val, tick_size, digits)
+                        else:
+                            # SELL: lower SL toward sma7 if it improves.
+                            if sma_val < pos_sl[i]:
+                                pos_sl[i] = _norm_price(sma_val, tick_size, digits)
+                    idx += 1
+                pos_ma7_last_idx[i] = idx
+
         # SL/TP on EXISTING positions
         for i in range(MAX_POSITIONS):
             if not pos_active[i]:
