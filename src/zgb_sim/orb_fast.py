@@ -115,6 +115,7 @@ def _run_sim(
     v1, v2, v3,                     # bool flags
     ma_trail,                       # bool: enable SMA(7) trail on runner post-HTP
     m5_close_ts, m5_sma7,           # int64[M], float64[M]: close ts + SMA7 per M5 bar
+    ma_trail_retrace_pct,           # float64: HWM retrace fraction to arm trail (0.0 = V1)
 ):
     """JIT ORB sim. sess_* arrays pre-built; iterate ticks, fire on session end."""
     pend_kind = np.zeros(MAX_PENDING, dtype=np.int8)
@@ -146,6 +147,10 @@ def _run_sim(
     pos_is_runner = np.zeros(MAX_POSITIONS, dtype=np.bool_)
     pos_htp_fired = np.zeros(MAX_POSITIONS, dtype=np.bool_)
     pos_ma7_last_idx = np.zeros(MAX_POSITIONS, dtype=np.int64)
+
+    # Retrace-gate state for MA7 trail (V2)
+    pos_hwm_profit = np.zeros(MAX_POSITIONS, dtype=np.float64)
+    pos_ma7_armed = np.zeros(MAX_POSITIONS, dtype=np.bool_)
 
     n_sess = sess_range_end_ns.shape[0]
     sess_fired = np.zeros(n_sess, dtype=np.bool_)
@@ -544,6 +549,8 @@ def _run_sim(
                     pos_is_runner[slot] = False
                     pos_htp_fired[slot] = False
                     pos_ma7_last_idx[slot] = 0
+                    pos_hwm_profit[slot] = 0.0
+                    pos_ma7_armed[slot] = False
                     if htp_ratio > 0:
                         # Search for sibling already-active position with same session+direction.
                         sib = -1
@@ -752,6 +759,7 @@ def simulate_fast(
         v1, v2, v3,
         bool(cfg.ma_trail),
         m5_close_ts, m5_sma7,
+        float(cfg.ma_trail_retrace_pct),
     )
 
     tp_count = sl_count = other_count = 0
