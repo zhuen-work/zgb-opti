@@ -77,6 +77,10 @@ class ORBConfig:
     # >0 = arm only after current unrealized PnL has retraced by at least this
     # fraction of HWM since HTP fired (e.g. 0.25 = wait for 25% giveback).
     ma_trail_retrace_pct: float = 0.0
+    # SMA(3) x SMA(5) cross exit on M5 closes (V3 follow-up to ma_trail).
+    # When True, post-HTP runners close on opposite-direction cross while in profit.
+    # Mutually exclusive with ma_trail (simulate_fast raises if both True).
+    sma_cross_exit: bool = False
     comment: str = "ORB"
 
 
