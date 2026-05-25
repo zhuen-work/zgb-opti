@@ -142,6 +142,11 @@ def _run_sim(
     pos_sl_trail_idx_dn = np.zeros(MAX_POSITIONS, dtype=np.int64)
     pos_sl_trail_idx_up = np.zeros(MAX_POSITIONS, dtype=np.int64)
 
+    # MA7 post-HTP trail state
+    pos_is_runner = np.zeros(MAX_POSITIONS, dtype=np.bool_)
+    pos_htp_fired = np.zeros(MAX_POSITIONS, dtype=np.bool_)
+    pos_ma7_last_idx = np.zeros(MAX_POSITIONS, dtype=np.int64)
+
     n_sess = sess_range_end_ns.shape[0]
     sess_fired = np.zeros(n_sess, dtype=np.bool_)
 
