@@ -67,6 +67,11 @@ class ORBConfig:
     fractal_confirm: bool = False      # V2: arm pending only after same-side fractal
     fractal_range: bool = False        # V3: range H/L from fractals not bar extremes
     fractal_width: int = 5             # bars each side; must be odd >=3 (3 or 5)
+    # ----- MA7 post-HTP trail (default OFF) -----
+    # Once HTP partial close fires on a stream's half-lot, the surviving "runner"
+    # position switches its SL from the static value to SMA(7, close) on M5.
+    # SL ratchets only in profit direction. No effect when half_tp_ratio == 0.
+    ma_trail: bool = False
     comment: str = "ORB"
 
 
