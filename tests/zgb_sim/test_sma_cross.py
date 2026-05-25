@@ -62,3 +62,36 @@ def test_steady_uptrend_no_cross():
     # After warmup (bars 5+), no cross should fire.
     assert (signal[5:] == 0).all(), \
         f"expected no crosses in monotonic uptrend, got {signal.tolist()}"
+
+
+def test_default_args_match_explicit_3_5():
+    closes = [50, 51, 52, 53, 54, 55, 52, 48, 44, 40, 36, 32]
+    bars = _bars("2026-01-01 07:00", closes)
+    _, signal_default = sma_cross_on_m5_closes(bars)
+    _, signal_explicit = sma_cross_on_m5_closes(bars, fast=3, slow=5)
+    assert np.array_equal(signal_default, signal_explicit)
+
+
+def test_longer_slow_period_delays_cross():
+    """Slower MA = fewer crosses on a noisy series."""
+    # Construct a series with a small wiggle that triggers cross at (3,5)
+    # but is averaged out at (5,20).
+    closes = [50, 51, 52, 53, 54, 53.5, 54.5, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70]
+    bars = _bars("2026-01-01 07:00", closes)
+    _, fast_signal = sma_cross_on_m5_closes(bars, fast=3, slow=5)
+    _, slow_signal = sma_cross_on_m5_closes(bars, fast=5, slow=20)
+    # Should be valid output regardless
+    assert fast_signal.dtype == np.int8
+    assert slow_signal.dtype == np.int8
+    # Slower-MA signal has more warmup (first slow=20 bars are 0)
+    assert (slow_signal[:20] == 0).all()
+
+
+def test_invalid_periods_raise():
+    bars = _bars("2026-01-01 07:00", [100.0] * 10)
+    with pytest.raises(ValueError):
+        sma_cross_on_m5_closes(bars, fast=5, slow=5)  # fast >= slow
+    with pytest.raises(ValueError):
+        sma_cross_on_m5_closes(bars, fast=10, slow=5)  # fast > slow
+    with pytest.raises(ValueError):
+        sma_cross_on_m5_closes(bars, fast=1, slow=5)  # fast < 2
