@@ -495,6 +495,33 @@ def _run_sim(
                     pos_session[slot] = new_pos_session[j]
                     pos_active[slot] = True
                     pos_be_done[slot] = False
+                    # MA7 trail: identify runner (the further-TP position per session+direction).
+                    # Default: not a runner.
+                    pos_is_runner[slot] = False
+                    pos_htp_fired[slot] = False
+                    pos_ma7_last_idx[slot] = 0
+                    if htp_ratio > 0:
+                        # Search for sibling already-active position with same session+direction.
+                        sib = -1
+                        for kk in range(MAX_POSITIONS):
+                            if kk == slot:
+                                continue
+                            if (pos_active[kk]
+                                    and pos_session[kk] == new_pos_session[j]
+                                    and pos_dir[kk] == new_pos_dir[j]):
+                                sib = kk
+                                break
+                        if sib >= 0:
+                            # Compare TP distance from entry (signed for direction):
+                            # runner has the further TP.
+                            new_tp_dist = abs(new_pos_tp[j] - new_pos_entry[j])
+                            sib_tp_dist = abs(pos_tp[sib] - pos_entry[sib])
+                            if new_tp_dist > sib_tp_dist:
+                                pos_is_runner[slot] = True
+                                pos_is_runner[sib] = False
+                            else:
+                                pos_is_runner[slot] = False
+                                pos_is_runner[sib] = True
                     if new_pos_dir[j] == 1:
                         pos_orig_sl_dist[slot] = new_pos_entry[j] - new_pos_sl[j]
                     else:
