@@ -619,6 +619,17 @@ def _run_sim(
                                     else:
                                         hi = mid
                                 pos_ma7_last_idx[kk] = np.int64(lo)
+                            # Same snap for V3 cross-exit so it can't see pre-HTP-fire crosses.
+                            if sma_cross_exit:
+                                lo = 0
+                                hi = len(m5_close_ts)
+                                while lo < hi:
+                                    mid = (lo + hi) // 2
+                                    if m5_close_ts[mid] < ts_ns:
+                                        lo = mid + 1
+                                    else:
+                                        hi = mid
+                                pos_cross_last_idx[kk] = np.int64(lo)
 
         # Add new positions (capture orig SL dist for BE trigger calc)
         for j in range(new_pos_count):
