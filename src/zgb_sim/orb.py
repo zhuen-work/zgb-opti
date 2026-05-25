@@ -86,6 +86,10 @@ class ORBConfig:
     # >0 = enable cross-exit only for sessions where M5-ATR(14)/range_pts > gate.
     # Higher value = restrict cross-exit to choppier sessions; clean trends bypass it.
     sma_cross_atr_gate: float = 0.0
+    # SMA periods for cross-exit signal (V5 sweep).
+    # Defaults preserve V3 behavior (3, 5). Constraint: fast < slow, fast >= 2.
+    sma_cross_fast: int = 3
+    sma_cross_slow: int = 5
     comment: str = "ORB"
 
 

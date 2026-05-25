@@ -823,7 +823,8 @@ def simulate_fast(
             "set at most one to True.")
     if bool(cfg.sma_cross_exit):
         from .sma_cross import sma_cross_on_m5_closes
-        m5_close_ts_x, m5_cross_signal = sma_cross_on_m5_closes(m5_bars)
+        m5_close_ts_x, m5_cross_signal = sma_cross_on_m5_closes(
+            m5_bars, fast=int(cfg.sma_cross_fast), slow=int(cfg.sma_cross_slow))
         # If both V1 (ma_trail) and V3 are off (cross only), m5_close_ts wasn't
         # computed above. Use the cross helper's close_ts (same M5 bars, same logic).
         if not bool(cfg.ma_trail):
