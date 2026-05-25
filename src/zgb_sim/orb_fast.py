@@ -671,6 +671,14 @@ def simulate_fast(
         m5_highs = m5_bars["high"].values.astype(np.float64)
         m5_lows = m5_bars["low"].values.astype(np.float64)
 
+    # MA7 trail precompute (only when enabled; otherwise empty arrays).
+    if bool(cfg.ma_trail):
+        from .ma_trail import sma7_on_m5_closes
+        m5_close_ts, m5_sma7 = sma7_on_m5_closes(m5_bars)
+    else:
+        m5_close_ts = np.empty(0, dtype=np.int64)
+        m5_sma7 = np.empty(0, dtype=np.float64)
+
     if len(tick_ts_ns) == 0:
         first_day = last_day = date.today()
     else:
@@ -742,9 +750,8 @@ def simulate_fast(
         f_up_ts, f_up_pr,
         f_dn_ts, f_dn_pr,
         v1, v2, v3,
-        False,
-        np.empty(0, dtype=np.int64),
-        np.empty(0, dtype=np.float64),
+        bool(cfg.ma_trail),
+        m5_close_ts, m5_sma7,
     )
 
     tp_count = sl_count = other_count = 0
