@@ -136,3 +136,134 @@ def _build_sr_sessions(m5_bars: pd.DataFrame, cfg) -> List[SRSession]:
                                        expire_ts=ex, range_high=rh,
                                        range_low=rl, session_tag=tag))
     return sessions
+
+
+# Task 4: Single-session fill modeling — V_stop happy path
+
+@dataclass(frozen=True)
+class SRConfig:
+    risk_pct: float = 1.0
+    mode: str = "stop"               # "stop" | "limit"
+    buffer_pts: int = 0
+
+
+@dataclass
+class SessionResult:
+    """Outcome of one SR session. outcome in: 'tp','sl','expired','skipped','expired_inflight'."""
+    outcome: str
+    entry_ts: Optional[pd.Timestamp] = None
+    entry_price: float = 0.0
+    exit_ts: Optional[pd.Timestamp] = None
+    exit_price: float = 0.0
+    direction: int = 0
+    lots: float = 0.0
+    pnl: float = 0.0
+    skip_reason: str = ""
+
+
+def _simulate_session(
+    session: SRSession,
+    m5_window: pd.DataFrame,    # M5 bars with ts in [range_end, expire_ts]
+    m1_window: pd.DataFrame,    # M1 bars with ts in [range_end, expire_ts]
+    cfg: SRConfig,
+    meta: SymbolMeta,
+    balance: float,
+) -> SessionResult:
+    """Simulate one session: scan M5 for first sweep+reclaim, arm a pending,
+    then walk M1 bars to detect fill -> SL/TP/expire.
+    """
+    active5 = m5_window[(m5_window["ts"] >= session.range_end) &
+                        (m5_window["ts"] <  session.expire_ts)]
+    setup: Optional[Setup] = None
+    sweep_bar_ts: Optional[pd.Timestamp] = None
+    for _, b in active5.iterrows():
+        s = _detect_sweep_setup(float(b["high"]), float(b["low"]),
+                                float(b["close"]),
+                                session.range_high, session.range_low)
+        if s is not None:
+            setup = s
+            sweep_bar_ts = b["ts"]
+            break
+    if setup is None:
+        return SessionResult(outcome="skipped", skip_reason="no_sweep")
+    if sweep_bar_ts is None:
+        return SessionResult(outcome="skipped", skip_reason="no_sweep")
+
+    entry = _build_entry(setup, mode=cfg.mode, buffer_pts=cfg.buffer_pts,
+                         range_high=session.range_high,
+                         range_low=session.range_low, point=meta.point)
+    if entry is None:
+        return SessionResult(outcome="skipped", skip_reason="no_rr")
+
+    # Use the underlying meta for price norm; scalper_v1._norm_price signature is (price, meta)
+    entry_px = _norm_price(entry.entry_price, meta)
+    sl_px    = _norm_price(entry.sl_price,    meta)
+    tp_px    = _norm_price(entry.tp_price,    meta)
+
+    sl_pts = int(round(abs(sl_px - entry_px) / meta.point))
+    lots = _calc_lots(balance, cfg.risk_pct, sl_pts, meta)
+    if lots <= 0:
+        return SessionResult(outcome="skipped", skip_reason="zero_lots")
+
+    one_m5 = pd.Timedelta(minutes=5)
+    arm_after = sweep_bar_ts + one_m5
+    walk = m1_window[(m1_window["ts"] >= arm_after) &
+                     (m1_window["ts"] <  session.expire_ts)]
+    filled = False
+    fill_ts: Optional[pd.Timestamp] = None
+    for _, b in walk.iterrows():
+        hi, lo, ts = float(b["high"]), float(b["low"]), b["ts"]
+        if not filled:
+            if entry.order_kind == "SELL_STOP" and lo <= entry_px:
+                filled = True; fill_ts = ts
+            elif entry.order_kind == "BUY_STOP" and hi >= entry_px:
+                filled = True; fill_ts = ts
+            elif entry.order_kind == "SELL_LIMIT" and hi >= entry_px:
+                filled = True; fill_ts = ts
+            elif entry.order_kind == "BUY_LIMIT" and lo <= entry_px:
+                filled = True; fill_ts = ts
+            if not filled:
+                continue
+        if entry.direction == -1:   # SELL
+            if hi >= sl_px:
+                exit_px = sl_px
+                pnl = (entry_px - exit_px) * lots * meta.tick_value / meta.tick_size
+                return SessionResult(outcome="sl", entry_ts=fill_ts,
+                                     entry_price=entry_px, exit_ts=ts,
+                                     exit_price=exit_px, direction=-1,
+                                     lots=lots, pnl=pnl)
+            if lo <= tp_px:
+                exit_px = tp_px
+                pnl = (entry_px - exit_px) * lots * meta.tick_value / meta.tick_size
+                return SessionResult(outcome="tp", entry_ts=fill_ts,
+                                     entry_price=entry_px, exit_ts=ts,
+                                     exit_price=exit_px, direction=-1,
+                                     lots=lots, pnl=pnl)
+        else:                        # BUY
+            if lo <= sl_px:
+                exit_px = sl_px
+                pnl = (exit_px - entry_px) * lots * meta.tick_value / meta.tick_size
+                return SessionResult(outcome="sl", entry_ts=fill_ts,
+                                     entry_price=entry_px, exit_ts=ts,
+                                     exit_price=exit_px, direction=+1,
+                                     lots=lots, pnl=pnl)
+            if hi >= tp_px:
+                exit_px = tp_px
+                pnl = (exit_px - entry_px) * lots * meta.tick_value / meta.tick_size
+                return SessionResult(outcome="tp", entry_ts=fill_ts,
+                                     entry_price=entry_px, exit_ts=ts,
+                                     exit_price=exit_px, direction=+1,
+                                     lots=lots, pnl=pnl)
+
+    if filled:
+        last = walk.iloc[-1]
+        exit_px = _norm_price(float(last["close"]), meta)
+        if entry.direction == -1:
+            pnl = (entry_px - exit_px) * lots * meta.tick_value / meta.tick_size
+        else:
+            pnl = (exit_px - entry_px) * lots * meta.tick_value / meta.tick_size
+        return SessionResult(outcome="expired_inflight",
+                             entry_ts=fill_ts, entry_price=entry_px,
+                             exit_ts=last["ts"], exit_price=exit_px,
+                             direction=entry.direction, lots=lots, pnl=pnl)
+    return SessionResult(outcome="expired", skip_reason="no_fill")

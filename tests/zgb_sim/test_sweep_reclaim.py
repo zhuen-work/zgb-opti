@@ -170,3 +170,56 @@ def test_sr_sessions_skips_session_with_no_m5_bars_in_range_window():
                        "close": 2000, "volume": 0})
     sessions = _build_sr_sessions(m5, cfg)
     assert sessions == []
+
+
+# Task 4: Single-session fill modeling — V_stop happy path
+from zgb_sim.scalper_v1 import SymbolMeta
+from zgb_sim.sweep_reclaim import _simulate_session, SessionResult, SRConfig
+
+
+def _bar(ts, o, h, l, c):
+    return {"ts": ts, "open": o, "high": h, "low": l, "close": c, "volume": 0}
+
+
+def _meta_default():
+    return SymbolMeta(point=0.01, tick_size=0.01, tick_value=1.0,
+                      stops_level_pts=20, volume_min=0.01, volume_max=500.0,
+                      volume_step=0.01, digits=2)
+
+
+def test_v_stop_sell_fills_and_hits_tp():
+    rs = pd.Timestamp("2026-02-16 07:00", tz="UTC")
+    re = pd.Timestamp("2026-02-16 07:30", tz="UTC")
+    ex = pd.Timestamp("2026-02-16 09:30", tz="UTC")
+    session = SRSession(range_start=rs, range_end=re, expire_ts=ex,
+                        range_high=2020.0, range_low=1990.0, session_tag="LDN")
+    # M5 in active window:
+    #   07:30 sweep+reclaim bar  high=2025 low=2010 close=2015  -> SELL setup
+    #   07:35 next bar trades through 2010 (fills SELL_STOP)    -> entry at 2010
+    #   07:40+ price falls to range_low (2010 -> 1990 = 200 pts) -> TP hit
+    m5_active = pd.DataFrame([
+        _bar(pd.Timestamp("2026-02-16 07:30", tz="UTC"), 2018, 2025, 2010, 2015),
+        _bar(pd.Timestamp("2026-02-16 07:35", tz="UTC"), 2015, 2017, 2005, 2008),
+        _bar(pd.Timestamp("2026-02-16 07:40", tz="UTC"), 2008, 2009, 1990, 1992),
+    ])
+    m1_active = pd.DataFrame([
+        _bar(pd.Timestamp("2026-02-16 07:35", tz="UTC"), 2015, 2017, 2014, 2014),
+        _bar(pd.Timestamp("2026-02-16 07:36", tz="UTC"), 2014, 2014, 2012, 2012),
+        _bar(pd.Timestamp("2026-02-16 07:37", tz="UTC"), 2012, 2012, 2010, 2010),
+        _bar(pd.Timestamp("2026-02-16 07:38", tz="UTC"), 2010, 2010, 2008, 2008),
+        _bar(pd.Timestamp("2026-02-16 07:39", tz="UTC"), 2008, 2008, 2005, 2005),
+        _bar(pd.Timestamp("2026-02-16 07:40", tz="UTC"), 2005, 2005, 2002, 2002),
+        _bar(pd.Timestamp("2026-02-16 07:41", tz="UTC"), 2002, 2002, 1998, 1998),
+        _bar(pd.Timestamp("2026-02-16 07:42", tz="UTC"), 1998, 1998, 1994, 1994),
+        _bar(pd.Timestamp("2026-02-16 07:43", tz="UTC"), 1994, 1994, 1990, 1990),
+        _bar(pd.Timestamp("2026-02-16 07:44", tz="UTC"), 1990, 1992, 1990, 1992),
+    ])
+    cfg = SRConfig(risk_pct=1.0, mode="stop", buffer_pts=0)
+    meta = _meta_default()
+    result = _simulate_session(session, m5_active, m1_active, cfg, meta,
+                               balance=10_000.0)
+    assert result.outcome == "tp"
+    assert result.entry_price == pytest.approx(2010.0)
+    assert result.exit_price  == pytest.approx(1990.0)
+    assert result.direction == -1
+    assert result.pnl > 0
