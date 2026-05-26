@@ -223,3 +223,108 @@ def test_v_stop_sell_fills_and_hits_tp():
     assert result.exit_price  == pytest.approx(1990.0)
     assert result.direction == -1
     assert result.pnl > 0
+
+
+# Task 5: V_limit + edge cases (TDD)
+def test_v_limit_sell_fills_on_retest_and_hits_tp():
+    rs = pd.Timestamp("2026-02-16 07:00", tz="UTC")
+    re = pd.Timestamp("2026-02-16 07:30", tz="UTC")
+    ex = pd.Timestamp("2026-02-16 09:30", tz="UTC")
+    session = SRSession(range_start=rs, range_end=re, expire_ts=ex,
+                        range_high=2020.0, range_low=1990.0, session_tag="LDN")
+    m5_active = pd.DataFrame([
+        _bar(pd.Timestamp("2026-02-16 07:30", tz="UTC"), 2018, 2025, 2010, 2015),
+        _bar(pd.Timestamp("2026-02-16 07:35", tz="UTC"), 2015, 2021, 2014, 2014),
+        _bar(pd.Timestamp("2026-02-16 07:40", tz="UTC"), 2014, 2014, 1990, 1992),
+    ])
+    m1_active = pd.DataFrame([
+        _bar(pd.Timestamp("2026-02-16 07:35", tz="UTC"), 2015, 2021, 2014, 2018),
+        _bar(pd.Timestamp("2026-02-16 07:36", tz="UTC"), 2018, 2019, 2016, 2016),
+        _bar(pd.Timestamp("2026-02-16 07:40", tz="UTC"), 2016, 2016, 2010, 2010),
+        _bar(pd.Timestamp("2026-02-16 07:41", tz="UTC"), 2010, 2010, 2000, 2000),
+        _bar(pd.Timestamp("2026-02-16 07:42", tz="UTC"), 2000, 2000, 1990, 1990),
+    ])
+    cfg = SRConfig(risk_pct=1.0, mode="limit", buffer_pts=0)
+    result = _simulate_session(session, m5_active, m1_active, cfg, _meta_default(),
+                               balance=10_000.0)
+    assert result.outcome == "tp"
+    assert result.entry_price == pytest.approx(2020.0)
+    assert result.exit_price  == pytest.approx(1990.0)
+
+
+def test_v_stop_sl_hit():
+    rs = pd.Timestamp("2026-02-16 07:00", tz="UTC")
+    re = pd.Timestamp("2026-02-16 07:30", tz="UTC")
+    ex = pd.Timestamp("2026-02-16 09:30", tz="UTC")
+    session = SRSession(range_start=rs, range_end=re, expire_ts=ex,
+                        range_high=2020.0, range_low=1990.0, session_tag="LDN")
+    m5_active = pd.DataFrame([
+        _bar(pd.Timestamp("2026-02-16 07:30", tz="UTC"), 2018, 2025, 2010, 2015),
+        _bar(pd.Timestamp("2026-02-16 07:35", tz="UTC"), 2015, 2026, 2009, 2024),
+    ])
+    m1_active = pd.DataFrame([
+        _bar(pd.Timestamp("2026-02-16 07:35", tz="UTC"), 2015, 2015, 2009, 2010),
+        _bar(pd.Timestamp("2026-02-16 07:36", tz="UTC"), 2010, 2015, 2010, 2015),
+        _bar(pd.Timestamp("2026-02-16 07:37", tz="UTC"), 2015, 2026, 2015, 2024),
+    ])
+    cfg = SRConfig(risk_pct=1.0, mode="stop", buffer_pts=0)
+    result = _simulate_session(session, m5_active, m1_active, cfg, _meta_default(),
+                               balance=10_000.0)
+    assert result.outcome == "sl"
+    assert result.exit_price == pytest.approx(2025.0)
+    assert result.pnl < 0
+
+
+def test_no_fill_expire_returns_expired():
+    rs = pd.Timestamp("2026-02-16 07:00", tz="UTC")
+    re = pd.Timestamp("2026-02-16 07:30", tz="UTC")
+    ex = pd.Timestamp("2026-02-16 09:30", tz="UTC")
+    session = SRSession(range_start=rs, range_end=re, expire_ts=ex,
+                        range_high=2020.0, range_low=1990.0, session_tag="LDN")
+    m5_active = pd.DataFrame([
+        _bar(pd.Timestamp("2026-02-16 07:30", tz="UTC"), 2018, 2025, 2010, 2015),
+        _bar(pd.Timestamp("2026-02-16 07:35", tz="UTC"), 2015, 2016, 2010, 2012),
+    ])
+    m1_active = pd.DataFrame([
+        _bar(pd.Timestamp("2026-02-16 07:35", tz="UTC"), 2015, 2016, 2014, 2014),
+        _bar(pd.Timestamp("2026-02-16 07:36", tz="UTC"), 2014, 2015, 2010, 2012),
+    ])
+    cfg = SRConfig(risk_pct=1.0, mode="limit", buffer_pts=0)
+    result = _simulate_session(session, m5_active, m1_active, cfg, _meta_default(),
+                               balance=10_000.0)
+    assert result.outcome == "expired"
+    assert result.skip_reason == "no_fill"
+
+
+def test_no_sweep_returns_skipped():
+    rs = pd.Timestamp("2026-02-16 07:00", tz="UTC")
+    re = pd.Timestamp("2026-02-16 07:30", tz="UTC")
+    ex = pd.Timestamp("2026-02-16 09:30", tz="UTC")
+    session = SRSession(range_start=rs, range_end=re, expire_ts=ex,
+                        range_high=2020.0, range_low=1990.0, session_tag="LDN")
+    m5_active = pd.DataFrame([
+        _bar(pd.Timestamp("2026-02-16 07:30", tz="UTC"), 2010, 2015, 2005, 2012),
+    ])
+    cfg = SRConfig(risk_pct=1.0, mode="stop", buffer_pts=0)
+    result = _simulate_session(session, m5_active, pd.DataFrame(), cfg,
+                               _meta_default(), balance=10_000.0)
+    assert result.outcome == "skipped"
+    assert result.skip_reason == "no_sweep"
+
+
+def test_v_stop_no_rr_skip():
+    rs = pd.Timestamp("2026-02-16 07:00", tz="UTC")
+    re = pd.Timestamp("2026-02-16 07:30", tz="UTC")
+    ex = pd.Timestamp("2026-02-16 09:30", tz="UTC")
+    session = SRSession(range_start=rs, range_end=re, expire_ts=ex,
+                        range_high=2020.0, range_low=1990.0, session_tag="LDN")
+    # SELL setup: high > range_high, close < range_high, but low <= range_low (no RR room)
+    # close=1985 <= range_low so buy_trig fails; sweep_low=1988 <= tp=1990 so _build_entry fails
+    m5_active = pd.DataFrame([
+        _bar(pd.Timestamp("2026-02-16 07:30", tz="UTC"), 2018, 2025, 1988, 1985),
+    ])
+    cfg = SRConfig(risk_pct=1.0, mode="stop", buffer_pts=0)
+    result = _simulate_session(session, m5_active, pd.DataFrame(), cfg,
+                               _meta_default(), balance=10_000.0)
+    assert result.outcome == "skipped"
+    assert result.skip_reason == "no_rr"
