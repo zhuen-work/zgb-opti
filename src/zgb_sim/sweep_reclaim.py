@@ -267,3 +267,99 @@ def _simulate_session(
                              exit_ts=last["ts"], exit_price=exit_px,
                              direction=entry.direction, lots=lots, pnl=pnl)
     return SessionResult(outcome="expired", skip_reason="no_fill")
+
+
+# Task 6: Top-level simulate() + diagnostic counters
+
+@dataclass
+class SRSimResult:
+    """Aggregated result from multi-session simulation."""
+    deals: List[Deal]
+    sessions_total: int
+    tp_count: int
+    sl_count: int
+    expire_inflight_count: int
+    expire_no_fill: int
+    skip_no_sweep: int
+    skip_no_rr: int
+    skip_zero_lots: int
+    initial_balance: float
+    final_balance: float
+
+
+def simulate(
+    m5_bars: pd.DataFrame,
+    m1_bars: pd.DataFrame,
+    parent_cfg,
+    sr_cfg: SRConfig,
+    meta: SymbolMeta,
+    initial_balance: float,
+) -> SRSimResult:
+    """Top-level multi-session SR_v1 simulator.
+
+    Builds SR sessions from ORB config (LDN/NY split), simulates each session,
+    aggregates outcomes and tracks balance evolution.
+
+    Args:
+        m5_bars: Full M5 OHLCV frame with 'ts' column (pd.Timestamp, UTC).
+        m1_bars: Full M1 OHLCV frame with 'ts' column (pd.Timestamp, UTC).
+        parent_cfg: ORBConfig with range_minutes, pending_expire_minutes,
+                    ldn_enabled, ldn_start_hour, ny_enabled, ny_start_hour.
+        sr_cfg: SRConfig with risk_pct, mode, buffer_pts.
+        meta: SymbolMeta (point, tick_size, tick_value, etc).
+        initial_balance: Starting account balance.
+
+    Returns:
+        SRSimResult with aggregated deals and diagnostic counters.
+    """
+    sessions = _build_sr_sessions(m5_bars, parent_cfg)
+    deals: List[Deal] = []
+    balance = initial_balance
+    tp = sl = exi = enf = sns = snr = szl = 0
+
+    for sess in sessions:
+        # Window M5/M1 bars to [range_end, expire_ts)
+        m5w = m5_bars[(m5_bars["ts"] >= sess.range_end) &
+                      (m5_bars["ts"] <  sess.expire_ts)]
+        m1w = m1_bars[(m1_bars["ts"] >= sess.range_end) &
+                      (m1_bars["ts"] <  sess.expire_ts)]
+        r = _simulate_session(sess, m5w, m1w, sr_cfg, meta, balance)
+
+        if r.outcome == "tp":
+            tp += 1
+            deals.append(Deal(ts=r.exit_ts, kind="tp", direction=r.direction,
+                              lots=r.lots, price=r.exit_price, pnl=r.pnl))
+            balance += r.pnl
+        elif r.outcome == "sl":
+            sl += 1
+            deals.append(Deal(ts=r.exit_ts, kind="sl", direction=r.direction,
+                              lots=r.lots, price=r.exit_price, pnl=r.pnl))
+            balance += r.pnl
+        elif r.outcome == "expired_inflight":
+            exi += 1
+            deals.append(Deal(ts=r.exit_ts, kind="other", direction=r.direction,
+                              lots=r.lots, price=r.exit_price, pnl=r.pnl))
+            balance += r.pnl
+        elif r.outcome == "expired":
+            enf += 1
+        elif r.outcome == "skipped":
+            if r.skip_reason == "no_sweep":
+                sns += 1
+            elif r.skip_reason == "no_rr":
+                snr += 1
+            elif r.skip_reason == "zero_lots":
+                szl += 1
+
+    return SRSimResult(
+        deals=deals,
+        sessions_total=len(sessions),
+        tp_count=tp,
+        sl_count=sl,
+        expire_inflight_count=exi,
+        expire_no_fill=enf,
+        skip_no_sweep=sns,
+        skip_no_rr=snr,
+        skip_zero_lots=szl,
+        initial_balance=initial_balance,
+        final_balance=balance,
+    )

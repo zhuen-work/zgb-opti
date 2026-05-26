@@ -328,3 +328,39 @@ def test_v_stop_no_rr_skip():
                                _meta_default(), balance=10_000.0)
     assert result.outcome == "skipped"
     assert result.skip_reason == "no_rr"
+
+
+# Task 6: Top-level simulate() + diagnostic counters
+from zgb_sim.sweep_reclaim import simulate, SRSimResult
+
+
+def test_simulate_aggregates_sessions():
+    # 2 weekdays, LDN-only, range_minutes=30, expire=60
+    days = [datetime(2026, 2, 16, tzinfo=timezone.utc),
+            datetime(2026, 2, 17, tzinfo=timezone.utc)]
+    rows_m5, rows_m1 = [], []
+    for d in days:
+        for k in range(6):
+            t = pd.Timestamp(d) + pd.Timedelta(minutes=5*k) + pd.Timedelta(hours=7)
+            rows_m5.append(_bar(t, 2000, 2020, 1990, 2000))
+        rows_m5.append(_bar(pd.Timestamp(d)+pd.Timedelta(hours=7,minutes=30),
+                            2018, 2025, 2010, 2015))   # sweep+reclaim SELL
+        for k, px in enumerate([2014, 2012, 2010, 2008, 2004, 2000, 1995, 1990]):
+            t = pd.Timestamp(d) + pd.Timedelta(hours=7, minutes=35+k)
+            rows_m1.append(_bar(t, px, px+1, px-1, px))
+    m5 = pd.DataFrame(rows_m5).sort_values("ts").reset_index(drop=True)
+    m1 = pd.DataFrame(rows_m1).sort_values("ts").reset_index(drop=True)
+    parent = ORBConfig(range_minutes=30, pending_expire_minutes=60,
+                       ldn_enabled=True, ldn_start_hour=7,
+                       ny_enabled=False)
+    cfg = SRConfig(risk_pct=1.0, mode="stop", buffer_pts=0)
+    res = simulate(m5, m1, parent, cfg, _meta_default(), initial_balance=10_000.0)
+    assert isinstance(res, SRSimResult)
+    assert res.sessions_total == 2
+    assert res.tp_count == 2
+    assert res.sl_count == 0
+    assert res.skip_no_sweep == 0
+    assert res.skip_no_rr == 0
+    assert res.expire_no_fill == 0
+    assert len(res.deals) == 2
+    assert all(d.pnl > 0 for d in res.deals)
