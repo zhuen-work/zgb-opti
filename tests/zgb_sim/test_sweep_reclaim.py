@@ -114,3 +114,59 @@ def test_v_limit_skip_not_triggered_by_sweep_depth():
                      range_high=2020.0, range_low=1990.0, point=0.01)
     assert e is not None
     assert e.entry_price == pytest.approx(2020.0)
+
+
+# Task 3: Session enumeration
+from datetime import datetime, timezone
+import pandas as pd
+from zgb_sim.orb import ORBConfig
+from zgb_sim.sweep_reclaim import _build_sr_sessions, SRSession
+
+
+def _make_m5_day(day: datetime, num_bars: int = 288, hi=2020.0, lo=1990.0):
+    """Build a flat synthetic M5 bar frame for one trading day."""
+    ts = pd.date_range(day, periods=num_bars, freq="5min", tz="UTC")
+    rows = []
+    for t in ts:
+        rows.append({"ts": t, "open": (hi+lo)/2, "high": hi, "low": lo,
+                     "close": (hi+lo)/2, "volume": 0})
+    return pd.DataFrame(rows)
+
+
+def test_sr_sessions_one_per_enabled_session_per_weekday():
+    # LDN+NY enabled, range_minutes=30, pending_expire_minutes=120
+    cfg = ORBConfig(range_minutes=30, pending_expire_minutes=120,
+                    ldn_enabled=True, ldn_start_hour=7,
+                    ny_enabled=True,  ny_start_hour=13)
+    # 5 weekdays of synthetic M5
+    frames = [_make_m5_day(datetime(2026, 2, 16, tzinfo=timezone.utc) +
+                           pd.Timedelta(days=d)) for d in range(5)]
+    m5 = pd.concat(frames, ignore_index=True)
+    sessions = _build_sr_sessions(m5, cfg)
+    assert len(sessions) == 10        # 5 days * 2 sessions
+    s = sessions[0]
+    assert s.range_start == pd.Timestamp("2026-02-16 07:00", tz="UTC")
+    assert s.range_end   == pd.Timestamp("2026-02-16 07:30", tz="UTC")
+    assert s.expire_ts   == pd.Timestamp("2026-02-16 09:30", tz="UTC")
+    assert s.range_high  == 2020.0
+    assert s.range_low   == 1990.0
+
+
+def test_sr_sessions_skips_weekends():
+    cfg = ORBConfig(range_minutes=30, pending_expire_minutes=60)
+    # Saturday 2026-02-14
+    m5 = _make_m5_day(datetime(2026, 2, 14, tzinfo=timezone.utc))
+    sessions = _build_sr_sessions(m5, cfg)
+    assert sessions == []
+
+
+def test_sr_sessions_skips_session_with_no_m5_bars_in_range_window():
+    cfg = ORBConfig(range_minutes=30, pending_expire_minutes=60,
+                    ldn_enabled=True, ldn_start_hour=7, ny_enabled=False)
+    # M5 frame starts at 10:00 (after LDN range window) — session skipped
+    ts = pd.date_range(datetime(2026, 2, 16, 10, 0, tzinfo=timezone.utc),
+                       periods=20, freq="5min", tz="UTC")
+    m5 = pd.DataFrame({"ts": ts, "open": 2000, "high": 2010, "low": 1990,
+                       "close": 2000, "volume": 0})
+    sessions = _build_sr_sessions(m5, cfg)
+    assert sessions == []

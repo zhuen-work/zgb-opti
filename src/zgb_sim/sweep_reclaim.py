@@ -90,3 +90,49 @@ def _build_entry(
             order_kind = "BUY_LIMIT"
         return Entry(direction=+1, order_kind=order_kind,
                      entry_price=entry, sl_price=sl, tp_price=tp)
+
+
+# Task 3: Session enumeration
+
+@dataclass(frozen=True)
+class SRSession:
+    range_start: pd.Timestamp
+    range_end:   pd.Timestamp
+    expire_ts:   pd.Timestamp
+    range_high:  float
+    range_low:   float
+    session_tag: str          # "LDN" or "NY" (diagnostic)
+
+
+def _build_sr_sessions(m5_bars: pd.DataFrame, cfg) -> List[SRSession]:
+    """Enumerate (LDN, NY) sessions across the M5 frame's date span.
+
+    Mon-Fri only. Skips sessions where no M5 bars cover [range_start, range_end).
+    Uses bar high/low extremes for range_high/range_low (entry_mode='wick' assumed —
+    SR_v1 spec doesn't expose entry_mode at Stage 1).
+    """
+    if m5_bars.empty:
+        return []
+    ts = pd.to_datetime(m5_bars["ts"], utc=True)
+    days = pd.unique(ts.dt.date)
+    sessions: List[SRSession] = []
+    enabled = []
+    if cfg.ldn_enabled: enabled.append(("LDN", cfg.ldn_start_hour))
+    if cfg.ny_enabled:  enabled.append(("NY",  cfg.ny_start_hour))
+    for d in days:
+        if pd.Timestamp(d).weekday() >= 5:    # Sat/Sun
+            continue
+        for tag, hr in enabled:
+            rs = pd.Timestamp(datetime.combine(d, time(hr, 0)), tz="UTC")
+            re = rs + pd.Timedelta(minutes=cfg.range_minutes)
+            ex = re + pd.Timedelta(minutes=cfg.pending_expire_minutes)
+            mask = (ts >= rs) & (ts < re)
+            if not mask.any():
+                continue
+            window = m5_bars.loc[mask]
+            rh = float(window["high"].max())
+            rl = float(window["low"].min())
+            sessions.append(SRSession(range_start=rs, range_end=re,
+                                       expire_ts=ex, range_high=rh,
+                                       range_low=rl, session_tag=tag))
+    return sessions
