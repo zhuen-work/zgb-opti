@@ -94,7 +94,7 @@ def make_setfile(risk_pct: float) -> str:
             f"; ===== ORB_S{n} -- {note} (magic {magic}) =====",
             f"_ORB_S{n}_Enabled=true",
             f"_ORB_S{n}_Magic={magic}||{magic}||1||{magic}||{magic}||N",
-            f"_ORB_S{n}_Comment=ORB_S{n}",
+            f"_ORB_S{n}_Comment=ORB_S{n}_v6_may23",
             f"_ORB_S{n}_RangeMinutes=90||90||1||90||90||N",
             f"_ORB_S{n}_FixedSL_Pts={sl}||{sl}||1||{sl}||{sl}||N",
             f"_ORB_S{n}_RR_Ratio={rr}||{rr}||1||{rr}||{rr}||N",
@@ -106,12 +106,12 @@ def make_setfile(risk_pct: float) -> str:
         ]
     # Hedge stream sections (STOP-ext, ENABLED)
     for (n, magic, sl, rr, htp, exp, _note) in STREAMS:
-        hmagic = 8000 + magic - 1000  # 1111 -> 8111
+        hmagic = 8000 + n * 111  # S1->8111, S2->8222 ... S6->8666
         lines += [
             f"; ===== HEDGE_S{n}r -- STOP-on-extension (v6) =====",
             f"_HEDGE_S{n}_Enabled=true",
             f"_HEDGE_S{n}_Magic={hmagic}||{hmagic}||1||{hmagic}||{hmagic}||N",
-            f"_HEDGE_S{n}_Comment=ORB_S{n}r",
+            f"_HEDGE_S{n}_Comment=ORB_S{n}r_v6_may23",
             f"_HEDGE_S{n}_ParentMagic={magic}||{magic}||1||{magic}||{magic}||N",
             f"_HEDGE_S{n}_FixedSL_Pts={sl}||{sl}||1||{sl}||{sl}||N    ; (legacy field, unused by v6)",
             f"_HEDGE_S{n}_RR_Ratio=3.0||3.0||1||3.0||3.0||N            ; (legacy field, unused by v6)",

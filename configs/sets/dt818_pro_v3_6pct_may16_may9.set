@@ -33,7 +33,6 @@ _MaxSpreadPts=60||60||1||60||60||N
 
 ; ===== ORB shared params =====
 _BrokerGMTOffsetHours=0||0||1||0||0||N  ; DEPRECATED post 2026-05-07 (EA uses TimeGMT)
-_ORB_BufferPts=0||0||1||0||0||N
 _ORB_MinRangePts=0||0||1||0||0||N
 _ORB_MaxRangePts=999999||999999||1||999999||999999||N
 _ORB_LDN_Enabled=true
@@ -118,13 +117,13 @@ _HEDGE_S1_Enabled=true
 _HEDGE_S1_Magic=8111||8111||1||8111||8111||N
 _HEDGE_S1_Comment=ORB_S1r
 _HEDGE_S1_ParentMagic=1111||1111||1||1111||1111||N
-_HEDGE_S1_BufferPts=0||0||1||0||0||N
 _HEDGE_S1_FixedSL_Pts=700||700||1||700||700||N
 _HEDGE_S1_RR_Ratio=5.0||5.0||1||5.0||5.0||N
 _HEDGE_S1_ExpireMinutes=240||240||1||240||240||N
 _HEDGE_S1_RiskPct=1.0||1.0||1||1.0||1.0||N
 _HEDGE_S1_MaxSecondsAfterEntry=1800||1800||1||1800||1800||N
-_HEDGE_S1_TPMult=5.0||5.0||1||5.0||5.0||N
+_HEDGE_S1_PartialFraction=0.5||0.5||0.05||0.5||0.7||N
+_HEDGE_S1_ProfitMult=1.2||1.2||0.1||1.1||2.0||N
 _HEDGE_S1_SLMult=1.0||1.0||1||1.0||1.0||N
 
 ; ===== HEDGE_S2r -- tp_mult=6.25, sl_mult=1.0, R=6.25:1 (R7 refined from 6.0) =====
@@ -132,13 +131,13 @@ _HEDGE_S2_Enabled=true
 _HEDGE_S2_Magic=8222||8222||1||8222||8222||N
 _HEDGE_S2_Comment=ORB_S2r
 _HEDGE_S2_ParentMagic=2222||2222||1||2222||2222||N
-_HEDGE_S2_BufferPts=0||0||1||0||0||N
 _HEDGE_S2_FixedSL_Pts=550||550||1||550||550||N
 _HEDGE_S2_RR_Ratio=6.25||6.25||1||6.25||6.25||N
 _HEDGE_S2_ExpireMinutes=240||240||1||240||240||N
 _HEDGE_S2_RiskPct=1.0||1.0||1||1.0||1.0||N
 _HEDGE_S2_MaxSecondsAfterEntry=1800||1800||1||1800||1800||N
-_HEDGE_S2_TPMult=6.25||6.25||1||6.25||6.25||N
+_HEDGE_S2_PartialFraction=0.5||0.5||0.05||0.5||0.7||N
+_HEDGE_S2_ProfitMult=1.2||1.2||0.1||1.1||2.0||N
 _HEDGE_S2_SLMult=1.0||1.0||1||1.0||1.0||N
 
 ; ===== HEDGE_S3r -- tp_mult=8.75, sl_mult=1.2, R=7.29:1 (BEST hedge contributor R7) =====
@@ -146,13 +145,13 @@ _HEDGE_S3_Enabled=true
 _HEDGE_S3_Magic=8333||8333||1||8333||8333||N
 _HEDGE_S3_Comment=ORB_S3r
 _HEDGE_S3_ParentMagic=3333||3333||1||3333||3333||N
-_HEDGE_S3_BufferPts=0||0||1||0||0||N
 _HEDGE_S3_FixedSL_Pts=480||480||1||480||480||N
 _HEDGE_S3_RR_Ratio=7.29||7.29||1||7.29||7.29||N
 _HEDGE_S3_ExpireMinutes=240||240||1||240||240||N
 _HEDGE_S3_RiskPct=1.0||1.0||1||1.0||1.0||N
 _HEDGE_S3_MaxSecondsAfterEntry=1800||1800||1||1800||1800||N
-_HEDGE_S3_TPMult=8.75||8.75||1||8.75||8.75||N
+_HEDGE_S3_PartialFraction=0.5||0.5||0.05||0.5||0.7||N
+_HEDGE_S3_ProfitMult=1.2||1.2||0.1||1.1||2.0||N
 _HEDGE_S3_SLMult=1.2||1.2||1||1.2||1.2||N
 
 ; ===== HEDGE_S4r -- tp_mult=6.25, sl_mult=1.0, R=6.25:1 (R7 refined from 6.0) =====
@@ -160,13 +159,13 @@ _HEDGE_S4_Enabled=true
 _HEDGE_S4_Magic=8444||8444||1||8444||8444||N
 _HEDGE_S4_Comment=ORB_S4r
 _HEDGE_S4_ParentMagic=4444||4444||1||4444||4444||N
-_HEDGE_S4_BufferPts=0||0||1||0||0||N
 _HEDGE_S4_FixedSL_Pts=550||550||1||550||550||N
 _HEDGE_S4_RR_Ratio=6.25||6.25||1||6.25||6.25||N
 _HEDGE_S4_ExpireMinutes=240||240||1||240||240||N
 _HEDGE_S4_RiskPct=1.0||1.0||1||1.0||1.0||N
 _HEDGE_S4_MaxSecondsAfterEntry=1800||1800||1||1800||1800||N
-_HEDGE_S4_TPMult=6.25||6.25||1||6.25||6.25||N
+_HEDGE_S4_PartialFraction=0.5||0.5||0.05||0.5||0.7||N
+_HEDGE_S4_ProfitMult=1.2||1.2||0.1||1.1||2.0||N
 _HEDGE_S4_SLMult=1.0||1.0||1||1.0||1.0||N
 
 ; ===== HEDGE_S5r -- tp_mult=6.25, sl_mult=1.0, R=6.25:1 (R7 refined from 6.0) =====
@@ -174,13 +173,13 @@ _HEDGE_S5_Enabled=true
 _HEDGE_S5_Magic=8555||8555||1||8555||8555||N
 _HEDGE_S5_Comment=ORB_S5r
 _HEDGE_S5_ParentMagic=5555||5555||1||5555||5555||N
-_HEDGE_S5_BufferPts=0||0||1||0||0||N
 _HEDGE_S5_FixedSL_Pts=550||550||1||550||550||N
 _HEDGE_S5_RR_Ratio=6.25||6.25||1||6.25||6.25||N
 _HEDGE_S5_ExpireMinutes=240||240||1||240||240||N
 _HEDGE_S5_RiskPct=1.0||1.0||1||1.0||1.0||N
 _HEDGE_S5_MaxSecondsAfterEntry=1800||1800||1||1800||1800||N
-_HEDGE_S5_TPMult=6.25||6.25||1||6.25||6.25||N
+_HEDGE_S5_PartialFraction=0.5||0.5||0.05||0.5||0.7||N
+_HEDGE_S5_ProfitMult=1.2||1.2||0.1||1.1||2.0||N
 _HEDGE_S5_SLMult=1.0||1.0||1||1.0||1.0||N
 
 ; ===== HEDGE_S6r -- tp_mult=6.25, sl_mult=1.0, R=6.25:1 (R7 refined from 6.0) =====
@@ -188,11 +187,11 @@ _HEDGE_S6_Enabled=true
 _HEDGE_S6_Magic=8666||8666||1||8666||8666||N
 _HEDGE_S6_Comment=ORB_S6r
 _HEDGE_S6_ParentMagic=6666||6666||1||6666||6666||N
-_HEDGE_S6_BufferPts=0||0||1||0||0||N
 _HEDGE_S6_FixedSL_Pts=550||550||1||550||550||N
 _HEDGE_S6_RR_Ratio=6.25||6.25||1||6.25||6.25||N
 _HEDGE_S6_ExpireMinutes=240||240||1||240||240||N
 _HEDGE_S6_RiskPct=1.0||1.0||1||1.0||1.0||N
 _HEDGE_S6_MaxSecondsAfterEntry=1800||1800||1||1800||1800||N
-_HEDGE_S6_TPMult=6.25||6.25||1||6.25||6.25||N
+_HEDGE_S6_PartialFraction=0.5||0.5||0.05||0.5||0.7||N
+_HEDGE_S6_ProfitMult=1.2||1.2||0.1||1.1||2.0||N
 _HEDGE_S6_SLMult=1.0||1.0||1||1.0||1.0||N

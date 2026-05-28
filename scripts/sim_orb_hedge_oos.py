@@ -35,7 +35,7 @@ _spec2 = importlib.util.spec_from_file_location("hedge_sweep", ROOT / "scripts" 
 hedge_sweep = importlib.util.module_from_spec(_spec2); _spec2.loader.exec_module(hedge_sweep)
 
 DEPOSIT = 10_000.0
-SPREAD = 23
+SPREAD = 30  # per feedback_default_test_conditions.md (all live = 30pt 2026-05-16)
 START = datetime(2026, 5, 4, tzinfo=timezone.utc)
 END = datetime.now(timezone.utc)
 

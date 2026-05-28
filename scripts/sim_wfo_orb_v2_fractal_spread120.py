@@ -1,0 +1,259 @@
+"""WFO for ORB with V2 fractal-confirm — SPREAD=120pt variant (2× standard 60pt).
+
+Same grid + ranker as sim_wfo_orb_v2_fractal.py but uses a 120pt synthetic
+spread for tick loading (vs the per-symbol default of 60pt). Output to a
+separate directory so the 60pt and 120pt rankings can be compared.
+
+Extends the standard sim_wfo_orb.py Phase 1 grid by multiplying by 3:
+  fractal_confirm: off  (baseline)
+                   on + width=3
+                   on + width=5
+
+Goal: confirm V2 dominance from the Apr 25 screen on 4 IS/OOS WFO windows,
+and pick the best (range × sl × rr × htp × expire × fractal) combo.
+
+Decision rule: V2 wins if the rank-1 OOS pick has fractal_confirm=True.
+If a V2-off config wins, V2 didn't survive out-of-sample.
+
+Grid: 1125 base configs x 3 fractal options = 3375 configs per window.
+With 6 workers on a 14-day IS window, expect ~12-15 min total.
+
+Prints marker lines for Monitor: [WIN], [OOS], [RANK], [DONE].
+"""
+from __future__ import annotations
+
+import sys
+import time
+from datetime import date, datetime, timezone
+from pathlib import Path
+
+import pandas as pd
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "src"))
+
+from zgb_sim.tick_loader import symbol_meta, kill_mt5_terminal
+from zgb_sim import tick_loader as _tl
+from zgb_sim.scalper_v1 import SymbolMeta
+from zgb_sim.orb import ORBConfig
+from zgb_sim.sweep_orb import run_sweep
+from zgb_sim.wfo_helpers import WINDOWS_MAY23 as WINDOWS, rank_with_p0
+
+SYMBOL = "XAUUSD"
+RISK_PCT = 6.0
+DEPOSIT = 10_000.0
+N_WORKERS = 1  # single-threaded to avoid MT5 pipe race on OOS-W4 retry
+SIGNAL_TF = "M5"
+WFO_SPREAD_PTS = 120  # 2× standard 60pt — stress test for slippage tolerance
+OUT_DIR = ROOT / "output" / "wfo_orb_v2_may23_spread120"
+OUT_DIR.mkdir(parents=True, exist_ok=True)
+
+# Override per-symbol default spread BEFORE run_sweep's workers spawn so they
+# inherit the bumped value. Each worker's load_ticks() will read this constant
+# when called without an explicit spread_pts arg.
+_tl.SYMBOL_DEFAULT_SPREAD_PTS[SYMBOL] = WFO_SPREAD_PTS
+_tl.SIM_SPREAD_PTS = WFO_SPREAD_PTS
+
+
+def _to_utc(d):
+    return datetime(d.year, d.month, d.day, tzinfo=timezone.utc)
+
+
+def build_grid() -> list[ORBConfig]:
+    """Focused grid centered on production winners x fractal_confirm dim."""
+    grid = []
+    fractal_opts = [
+        (False, 5),  # off
+        (True, 3),
+        (True, 5),
+    ]
+    for range_min in (60, 90):                                    # 2 (near production 90)
+        for fixed_sl in (400, 550, 700):                          # 3 (production cluster)
+            for rr in (2.5, 3.0, 3.5, 4.0):                       # 4 (production cluster)
+                for htp in (0.0, 0.4):                            # 2 (production uses 0/0.4)
+                    for expire_min in (240,):                     # 1 (production default)
+                        for (fc, fw) in fractal_opts:
+                            grid.append(ORBConfig(
+                                risk_pct=RISK_PCT,
+                                range_minutes=range_min,
+                                buffer_pts=0,
+                                min_range_pts=0,
+                                max_range_pts=999_999,
+                                fixed_sl_pts=fixed_sl,
+                                rr_ratio=rr,
+                                half_tp_ratio=htp,
+                                pending_expire_minutes=expire_min,
+                                daily_target_pct=0.0,
+                                daily_loss_pct=0.0,
+                                ldn_enabled=True, ldn_start_hour=7,
+                                ny_enabled=True, ny_start_hour=13,
+                                fractal_confirm=fc,
+                                fractal_width=fw,
+                                comment="ORB",
+                            ))
+    return grid
+
+
+def _param_key(row):
+    fc = bool(row.get("fractal_confirm", False))
+    fw = int(row.get("fractal_width", 5))
+    return (
+        int(row["range_minutes"]),
+        int(row["fixed_sl_pts"]),
+        round(float(row["rr_ratio"]), 2),
+        round(float(row["half_tp_ratio"]), 2),
+        int(row["pending_expire_minutes"]),
+        fc, fw,
+    )
+
+
+def select_robust(per_window, top_n=30, max_candidates=20):
+    counts = {}
+    for label, df in per_window.items():
+        prof = df[(df["net_profit"] > 0) & (df["trades"] >= 5) & df["error"].isna()]
+        top = prof.sort_values("recovery_factor", ascending=False).head(top_n)
+        for _, row in top.iterrows():
+            k = _param_key(row)
+            c = counts.setdefault(k, {"count": 0, "windows": [], "total_rf": 0.0,
+                                      "total_np": 0.0, "sample_row": row})
+            c["count"] += 1
+            c["windows"].append(label)
+            c["total_rf"] += float(row["recovery_factor"])
+            c["total_np"] += float(row["net_profit"])
+    robust = [(k, info) for k, info in counts.items() if info["count"] >= 2]
+    if not robust:
+        # Fallback: top by combined RF
+        combined = list(counts.items())
+        combined.sort(key=lambda x: -x[1]["total_rf"])
+        robust = combined[: max_candidates * 2]
+    robust.sort(key=lambda x: -x[1]["total_rf"])
+    seen = set()
+    unique = []
+    for k, info in robust:
+        if k in seen:
+            continue
+        seen.add(k)
+        unique.append((k, info))
+        if len(unique) >= max_candidates:
+            break
+
+    cands = []
+    for k, info in unique:
+        r = info["sample_row"]
+        cands.append(ORBConfig(
+            risk_pct=RISK_PCT,
+            range_minutes=int(r["range_minutes"]),
+            buffer_pts=0,
+            min_range_pts=0, max_range_pts=999_999,
+            fixed_sl_pts=int(r["fixed_sl_pts"]),
+            rr_ratio=float(r["rr_ratio"]),
+            half_tp_ratio=round(float(r["half_tp_ratio"]), 2),
+            pending_expire_minutes=int(r["pending_expire_minutes"]),
+            daily_target_pct=0.0, daily_loss_pct=0.0,
+            ldn_enabled=True, ldn_start_hour=7,
+            ny_enabled=True, ny_start_hour=13,
+            fractal_confirm=bool(r.get("fractal_confirm", False)),
+            fractal_width=int(r.get("fractal_width", 5)),
+            comment="ORB",
+        ))
+    return cands
+
+
+def fmt_cfg(c: ORBConfig) -> str:
+    fc = f"V2_w{c.fractal_width}" if c.fractal_confirm else "OFF "
+    return (f"Range={c.range_minutes:>3} SL={c.fixed_sl_pts:>4} "
+            f"RR={c.rr_ratio:<3} HTP={c.half_tp_ratio:<3} "
+            f"Exp={c.pending_expire_minutes:>3} {fc}")
+
+
+def main():
+    print(f"[BOOT] V2-fractal WFO SPREAD={WFO_SPREAD_PTS}pt on {WINDOWS[0][0]}..{WINDOWS[-1][0]}", flush=True)
+    m = symbol_meta(SYMBOL)
+    meta = SymbolMeta(point=m["point"], digits=m["digits"], tick_size=m["tick_size"],
+                      tick_value=m["tick_value"], stops_level_pts=m["stops_level"],
+                      volume_min=m["volume_min"], volume_max=m["volume_max"],
+                      volume_step=m["volume_step"])
+    # NOTE: do NOT kill MT5 here — workers need it to fetch any month not in
+    # the parquet cache (e.g. May 2026 ticks for W3/W4). Kill at end only.
+
+    configs = build_grid()
+    print(f"[GRID] {len(configs)} configs per window ({len(WINDOWS)} windows)", flush=True)
+
+    # === Phase 1: IS sweep per window ===
+    is_per = {}
+    for label, is_s, is_e, _, _ in WINDOWS:
+        cache = OUT_DIR / f"p1_is_{label}.parquet"
+        t0 = time.time()
+        df = run_sweep(configs, SYMBOL, _to_utc(is_s), _to_utc(is_e),
+                       meta, initial_balance=DEPOSIT, n_workers=N_WORKERS,
+                       cache_path=cache, window_label=f"IS-{label}", signal_tf=SIGNAL_TF)
+        is_per[label] = df
+        elapsed = time.time() - t0
+        print(f"[WIN] IS-{label} done in {elapsed:.0f}s ({len(df)} rows)", flush=True)
+
+    # === Robust candidate selection ===
+    cands = select_robust(is_per, top_n=30, max_candidates=20)
+    print(f"[RANK] {len(cands)} robust candidates selected", flush=True)
+    for i, c in enumerate(cands[:10]):
+        print(f"  cand#{i+1} {fmt_cfg(c)}", flush=True)
+
+    # === Phase 1: OOS validation per window ===
+    oos_per = {}
+    for label, _, _, oos_s, oos_e in WINDOWS:
+        cache = OUT_DIR / f"p1_oos_{label}.parquet"
+        t0 = time.time()
+        df = run_sweep(cands, SYMBOL, _to_utc(oos_s), _to_utc(oos_e),
+                       meta, initial_balance=DEPOSIT,
+                       n_workers=min(N_WORKERS, len(cands)),
+                       cache_path=cache, window_label=f"OOS-{label}", signal_tf=SIGNAL_TF)
+        oos_per[label] = df
+        elapsed = time.time() - t0
+        print(f"[OOS] OOS-{label} done in {elapsed:.0f}s", flush=True)
+
+    # === Rank with p0 ===
+    # grid_configs/is_per_window are the FULL sweep (144 configs), not the
+    # selected candidates — plateau lookup needs the full grid to compute
+    # avg IS NP across neighbours.
+    ranked = rank_with_p0(cands, oos_per, WINDOWS, decay_threshold=-0.25,
+                           grid_configs=configs, is_per_window=is_per)
+
+    print(f"[RANK] Final OOS rank top-10:", flush=True)
+    for i, info in enumerate(ranked[:10]):
+        c = info["cfg"]
+        np_dd = info.get("np_dd_ratio", float("nan"))
+        prof = info.get("prof_count", 0)
+        total_np = info.get("total_np", 0)
+        print(f"  rank#{i+1} prof={prof}/4 total_np=${total_np:>+8,.0f} "
+              f"NP/DD$={np_dd:>5.2f}  {fmt_cfg(c)}", flush=True)
+
+    # Decision: did V2 win?
+    rank1 = ranked[0]["cfg"]
+    v2_in_top3 = sum(1 for i in range(min(3, len(ranked))) if ranked[i]["cfg"].fractal_confirm)
+    rank1_is_v2 = bool(rank1.fractal_confirm)
+    print(f"[DONE] rank1_is_V2={rank1_is_v2}  v2_in_top3={v2_in_top3}/3", flush=True)
+
+    # Write a summary CSV
+    rows = []
+    for i, info in enumerate(ranked):
+        c = info["cfg"]
+        rows.append({
+            "rank": i + 1,
+            "prof_count": info.get("prof_count", 0),
+            "total_np": info.get("total_np", 0),
+            "np_dd_ratio": info.get("np_dd_ratio", 0),
+            "range_minutes": c.range_minutes,
+            "fixed_sl_pts": c.fixed_sl_pts,
+            "rr_ratio": c.rr_ratio,
+            "half_tp_ratio": c.half_tp_ratio,
+            "pending_expire_minutes": c.pending_expire_minutes,
+            "fractal_confirm": c.fractal_confirm,
+            "fractal_width": c.fractal_width,
+        })
+    pd.DataFrame(rows).to_csv(OUT_DIR / "oos_rank.csv", index=False)
+    print(f"[DONE] Wrote {OUT_DIR / 'oos_rank.csv'}", flush=True)
+    kill_mt5_terminal()
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -43,3 +43,7 @@ jobs/generated/
 *.xml
 *.opt
 *.report
+
+# Screenshots + browser-tool scratch (not source)
+/*.png
+.playwright-mcp/

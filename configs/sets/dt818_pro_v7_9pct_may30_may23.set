@@ -1,0 +1,211 @@
+; DT818_pro_v7 - 6-stream ORB rank portfolio + 6 STOP-ext hedges + SMA(8,21) cross-exit
+; Generated 2026-05-26 from output/wfo_orb_v7_smacross_may23/oos_rank.csv
+;                       hedges unchanged from v6 STOP-ext (ExtPts=100, TPMult=3.0, SLMult=1.0)
+; Use with ea/DT818_pro_v7.mq5.
+;
+; v7 vs v6 key changes:
+;   NEW: SMA(8) x SMA(21) cross-exit on M5 for post-HTP runners (LOCKED periods).
+;     - When SMA3-of-8 crosses below SMA-of-21 on M5 close AND runner is LONG
+;       and in profit, runner closes at market.
+;     - When SMA-of-8 crosses above SMA-of-21 AND runner is SHORT and in profit,
+;       runner closes at market.
+;     - Activates AFTER HTP partial close fires on the parent stream.
+;     - Hedges (8xxx) untouched.
+;   Rationale (output/wfo_orb_v7_smacross_may23/):
+;     V5 sweep 2026-05-25 showed s8_21 produces +$759 4-wk NP gain over
+;     baseline with 0 windows regressing >=-15%. WFO May 23 confirms top-7
+;     all 4/4 profitable with cross-exit active.
+;
+; v7 sim performance (4-window WFO, $10k, 6%/stream, 30pt):
+;   rank#1 (Range=60 SL=550 RR=3.5 HTP=0.4): total_np=$39,399 NP/DD$=2311
+;   rank#2 (Range=90 SL=550 RR=4.0 HTP=0.4): total_np=$60,626 NP/DD$=3420
+;   rank#3 (Range=90 SL=400 RR=3.5 HTP=0.4): total_np=$51,293 NP/DD$=3441
+;
+; PARENT total risk: 9.0% (1.5% × 6 streams).
+; Hedge magics: 8111-8666 (STOP-ext, unchanged from v6).
+;
+; Spread guard: _MaxSpreadPts=60
+
+; ===== Global account =====
+_CapitalProtectionAmount=0.0||0.0||1||0.0||0.0||N
+_RiskPct=1.5||1.5||1||1.5||1.5||N
+_LotMode=1||1||1||1||1||N
+TierBase=2000||2000||1||2000||2000||N
+LotStep=0.01||0.01||1||0.01||0.01||N
+_MaxSpreadPts=60||60||1||60||60||N
+
+; ===== ORB shared params (v5/v6 globals incl. V2 fractal-confirm) =====
+_BrokerGMTOffsetHours=0||0||1||0||0||N  ; DEPRECATED post 2026-05-07 (EA uses TimeGMT)
+_ORB_MinRangePts=0||0||1||0||0||N             ; range filter DISABLED
+_ORB_MaxRangePts=999999||999999||1||999999||999999||N
+_ORB_LDN_Enabled=true
+_ORB_LDN_StartHour=4||4||1||4||4||N
+_ORB_NY_Enabled=true
+_ORB_NY_StartHour=10||10||1||10||10||N
+_ORB_FractalConfirm=true                     ; v5/v6: V2 gate ALL streams
+_ORB_FractalWidth=5||5||1||3||5||N           ; Bill Williams 5-bar fractal
+_ORB_SMA_CrossExit=true                       ; v7: SMA(8)x(21) cross-exit on post-HTP runner
+_ORB_SMA_FastPeriod=8||8||1||8||8||N           ; LOCKED 2026-05-26 (V5 sweep winner)
+_ORB_SMA_SlowPeriod=21||21||1||21||21||N       ; LOCKED 2026-05-26 (V5 sweep winner)
+
+; ===== ORB_S1 -- WFO rank#1 4/4 NP/DD$=3593 (magic 1111) =====
+_ORB_S1_Enabled=true
+_ORB_S1_Magic=1111||1111||1||1111||1111||N
+_ORB_S1_Comment=ORB_S1_v7_may23
+_ORB_S1_RangeMinutes=90||90||1||90||90||N
+_ORB_S1_FixedSL_Pts=550||550||1||550||550||N
+_ORB_S1_RR_Ratio=2.0||2.0||1||2.0||2.0||N
+_ORB_S1_HalfTP_Ratio=0.4||0.4||1||0.4||0.4||N
+_ORB_S1_PendingExpireMinutes=720||720||1||720||720||N
+_ORB_S1_DailyTargetPct=0.0||0.0||1||0.0||0.0||N
+_ORB_S1_DailyLossPct=0.0||0.0||1||0.0||0.0||N
+
+; ===== ORB_S2 -- WFO rank#2 3/4 NP/DD$=3669 (magic 2222) =====
+_ORB_S2_Enabled=true
+_ORB_S2_Magic=2222||2222||1||2222||2222||N
+_ORB_S2_Comment=ORB_S2_v7_may23
+_ORB_S2_RangeMinutes=90||90||1||90||90||N
+_ORB_S2_FixedSL_Pts=400||400||1||400||400||N
+_ORB_S2_RR_Ratio=3.5||3.5||1||3.5||3.5||N
+_ORB_S2_HalfTP_Ratio=0.4||0.4||1||0.4||0.4||N
+_ORB_S2_PendingExpireMinutes=720||720||1||720||720||N
+_ORB_S2_DailyTargetPct=0.0||0.0||1||0.0||0.0||N
+_ORB_S2_DailyLossPct=0.0||0.0||1||0.0||0.0||N
+
+; ===== ORB_S3 -- WFO rank#3 3/4 NP/DD$=3743 (magic 3333) =====
+_ORB_S3_Enabled=true
+_ORB_S3_Magic=3333||3333||1||3333||3333||N
+_ORB_S3_Comment=ORB_S3_v7_may23
+_ORB_S3_RangeMinutes=90||90||1||90||90||N
+_ORB_S3_FixedSL_Pts=400||400||1||400||400||N
+_ORB_S3_RR_Ratio=3.5||3.5||1||3.5||3.5||N
+_ORB_S3_HalfTP_Ratio=0.4||0.4||1||0.4||0.4||N
+_ORB_S3_PendingExpireMinutes=480||480||1||480||480||N
+_ORB_S3_DailyTargetPct=0.0||0.0||1||0.0||0.0||N
+_ORB_S3_DailyLossPct=0.0||0.0||1||0.0||0.0||N
+
+; ===== ORB_S4 -- WFO rank#4 3/4 NP/DD$=3014 (magic 4444) =====
+_ORB_S4_Enabled=true
+_ORB_S4_Magic=4444||4444||1||4444||4444||N
+_ORB_S4_Comment=ORB_S4_v7_may23
+_ORB_S4_RangeMinutes=90||90||1||90||90||N
+_ORB_S4_FixedSL_Pts=400||400||1||400||400||N
+_ORB_S4_RR_Ratio=4.0||4.0||1||4.0||4.0||N
+_ORB_S4_HalfTP_Ratio=0.2||0.2||1||0.2||0.2||N
+_ORB_S4_PendingExpireMinutes=720||720||1||720||720||N
+_ORB_S4_DailyTargetPct=0.0||0.0||1||0.0||0.0||N
+_ORB_S4_DailyLossPct=0.0||0.0||1||0.0||0.0||N
+
+; ===== ORB_S5 -- WFO rank#5 3/4 NP/DD$=3006 (magic 5555) =====
+_ORB_S5_Enabled=true
+_ORB_S5_Magic=5555||5555||1||5555||5555||N
+_ORB_S5_Comment=ORB_S5_v7_may23
+_ORB_S5_RangeMinutes=90||90||1||90||90||N
+_ORB_S5_FixedSL_Pts=400||400||1||400||400||N
+_ORB_S5_RR_Ratio=2.5||2.5||1||2.5||2.5||N
+_ORB_S5_HalfTP_Ratio=0.4||0.4||1||0.4||0.4||N
+_ORB_S5_PendingExpireMinutes=720||720||1||720||720||N
+_ORB_S5_DailyTargetPct=0.0||0.0||1||0.0||0.0||N
+_ORB_S5_DailyLossPct=0.0||0.0||1||0.0||0.0||N
+
+; ===== ORB_S6 -- WFO rank#1 4/4 NP/DD$=3593 (magic 6666) =====
+_ORB_S6_Enabled=true
+_ORB_S6_Magic=6666||6666||1||6666||6666||N
+_ORB_S6_Comment=ORB_S6_v7_may23
+_ORB_S6_RangeMinutes=90||90||1||90||90||N
+_ORB_S6_FixedSL_Pts=550||550||1||550||550||N
+_ORB_S6_RR_Ratio=2.0||2.0||1||2.0||2.0||N
+_ORB_S6_HalfTP_Ratio=0.4||0.4||1||0.4||0.4||N
+_ORB_S6_PendingExpireMinutes=720||720||1||720||720||N
+_ORB_S6_DailyTargetPct=0.0||0.0||1||0.0||0.0||N
+_ORB_S6_DailyLossPct=0.0||0.0||1||0.0||0.0||N
+
+; ===== HEDGE_S1r -- STOP-on-extension (v6) =====
+_HEDGE_S1_Enabled=true
+_HEDGE_S1_Magic=8111||8111||1||8111||8111||N
+_HEDGE_S1_Comment=ORB_S1r_v7_may23
+_HEDGE_S1_ParentMagic=1111||1111||1||1111||1111||N
+_HEDGE_S1_FixedSL_Pts=550||550||1||550||550||N    ; (legacy field, unused by v6)
+_HEDGE_S1_RR_Ratio=3.0||3.0||1||3.0||3.0||N            ; (legacy field, unused by v6)
+_HEDGE_S1_ExpireMinutes=240||240||1||240||240||N
+_HEDGE_S1_MaxSecondsAfterEntry=1800||1800||1||1800||1800||N
+_HEDGE_S1_PartialFraction=0.5||0.5||0.05||0.5||0.7||N  ; DEPRECATED in v6 (v5 smart-TP field)
+_HEDGE_S1_ProfitMult=3.0||3.0||0.1||1.2||4.0||N        ; DEPRECATED in v6
+_HEDGE_S1_SLMult=1.0||1.0||1||1.0||1.0||N
+_HEDGE_S1_ExtPts=100||100||1||100||100||N    ; v6: points past parent SL
+_HEDGE_S1_TPMult=3.0||3.0||0.1||3.0||3.0||N  ; v6: TP = ExtPts Ã— TPMult
+
+; ===== HEDGE_S2r -- STOP-on-extension (v6) =====
+_HEDGE_S2_Enabled=true
+_HEDGE_S2_Magic=9222||9222||1||9222||9222||N
+_HEDGE_S2_Comment=ORB_S2r_v7_may23
+_HEDGE_S2_ParentMagic=2222||2222||1||2222||2222||N
+_HEDGE_S2_FixedSL_Pts=400||400||1||400||400||N    ; (legacy field, unused by v6)
+_HEDGE_S2_RR_Ratio=3.0||3.0||1||3.0||3.0||N            ; (legacy field, unused by v6)
+_HEDGE_S2_ExpireMinutes=240||240||1||240||240||N
+_HEDGE_S2_MaxSecondsAfterEntry=1800||1800||1||1800||1800||N
+_HEDGE_S2_PartialFraction=0.5||0.5||0.05||0.5||0.7||N  ; DEPRECATED in v6 (v5 smart-TP field)
+_HEDGE_S2_ProfitMult=3.0||3.0||0.1||1.2||4.0||N        ; DEPRECATED in v6
+_HEDGE_S2_SLMult=1.0||1.0||1||1.0||1.0||N
+_HEDGE_S2_ExtPts=100||100||1||100||100||N    ; v6: points past parent SL
+_HEDGE_S2_TPMult=3.0||3.0||0.1||3.0||3.0||N  ; v6: TP = ExtPts Ã— TPMult
+
+; ===== HEDGE_S3r -- STOP-on-extension (v6) =====
+_HEDGE_S3_Enabled=true
+_HEDGE_S3_Magic=10333||10333||1||10333||10333||N
+_HEDGE_S3_Comment=ORB_S3r_v7_may23
+_HEDGE_S3_ParentMagic=3333||3333||1||3333||3333||N
+_HEDGE_S3_FixedSL_Pts=550||550||1||550||550||N    ; (legacy field, unused by v6)
+_HEDGE_S3_RR_Ratio=3.0||3.0||1||3.0||3.0||N            ; (legacy field, unused by v6)
+_HEDGE_S3_ExpireMinutes=240||240||1||240||240||N
+_HEDGE_S3_MaxSecondsAfterEntry=1800||1800||1||1800||1800||N
+_HEDGE_S3_PartialFraction=0.5||0.5||0.05||0.5||0.7||N  ; DEPRECATED in v6 (v5 smart-TP field)
+_HEDGE_S3_ProfitMult=3.0||3.0||0.1||1.2||4.0||N        ; DEPRECATED in v6
+_HEDGE_S3_SLMult=1.0||1.0||1||1.0||1.0||N
+_HEDGE_S3_ExtPts=100||100||1||100||100||N    ; v6: points past parent SL
+_HEDGE_S3_TPMult=3.0||3.0||0.1||3.0||3.0||N  ; v6: TP = ExtPts Ã— TPMult
+
+; ===== HEDGE_S4r -- STOP-on-extension (v6) =====
+_HEDGE_S4_Enabled=true
+_HEDGE_S4_Magic=11444||11444||1||11444||11444||N
+_HEDGE_S4_Comment=ORB_S4r_v7_may23
+_HEDGE_S4_ParentMagic=4444||4444||1||4444||4444||N
+_HEDGE_S4_FixedSL_Pts=550||550||1||550||550||N    ; (legacy field, unused by v6)
+_HEDGE_S4_RR_Ratio=3.0||3.0||1||3.0||3.0||N            ; (legacy field, unused by v6)
+_HEDGE_S4_ExpireMinutes=240||240||1||240||240||N
+_HEDGE_S4_MaxSecondsAfterEntry=1800||1800||1||1800||1800||N
+_HEDGE_S4_PartialFraction=0.5||0.5||0.05||0.5||0.7||N  ; DEPRECATED in v6 (v5 smart-TP field)
+_HEDGE_S4_ProfitMult=3.0||3.0||0.1||1.2||4.0||N        ; DEPRECATED in v6
+_HEDGE_S4_SLMult=1.0||1.0||1||1.0||1.0||N
+_HEDGE_S4_ExtPts=100||100||1||100||100||N    ; v6: points past parent SL
+_HEDGE_S4_TPMult=3.0||3.0||0.1||3.0||3.0||N  ; v6: TP = ExtPts Ã— TPMult
+
+; ===== HEDGE_S5r -- STOP-on-extension (v6) =====
+_HEDGE_S5_Enabled=true
+_HEDGE_S5_Magic=12555||12555||1||12555||12555||N
+_HEDGE_S5_Comment=ORB_S5r_v7_may23
+_HEDGE_S5_ParentMagic=5555||5555||1||5555||5555||N
+_HEDGE_S5_FixedSL_Pts=550||550||1||550||550||N    ; (legacy field, unused by v6)
+_HEDGE_S5_RR_Ratio=3.0||3.0||1||3.0||3.0||N            ; (legacy field, unused by v6)
+_HEDGE_S5_ExpireMinutes=240||240||1||240||240||N
+_HEDGE_S5_MaxSecondsAfterEntry=1800||1800||1||1800||1800||N
+_HEDGE_S5_PartialFraction=0.5||0.5||0.05||0.5||0.7||N  ; DEPRECATED in v6 (v5 smart-TP field)
+_HEDGE_S5_ProfitMult=3.0||3.0||0.1||1.2||4.0||N        ; DEPRECATED in v6
+_HEDGE_S5_SLMult=1.0||1.0||1||1.0||1.0||N
+_HEDGE_S5_ExtPts=100||100||1||100||100||N    ; v6: points past parent SL
+_HEDGE_S5_TPMult=3.0||3.0||0.1||3.0||3.0||N  ; v6: TP = ExtPts Ã— TPMult
+
+; ===== HEDGE_S6r -- STOP-on-extension (v6) =====
+_HEDGE_S6_Enabled=true
+_HEDGE_S6_Magic=13666||13666||1||13666||13666||N
+_HEDGE_S6_Comment=ORB_S6r_v7_may23
+_HEDGE_S6_ParentMagic=6666||6666||1||6666||6666||N
+_HEDGE_S6_FixedSL_Pts=400||400||1||400||400||N    ; (legacy field, unused by v6)
+_HEDGE_S6_RR_Ratio=3.0||3.0||1||3.0||3.0||N            ; (legacy field, unused by v6)
+_HEDGE_S6_ExpireMinutes=240||240||1||240||240||N
+_HEDGE_S6_MaxSecondsAfterEntry=1800||1800||1||1800||1800||N
+_HEDGE_S6_PartialFraction=0.5||0.5||0.05||0.5||0.7||N  ; DEPRECATED in v6 (v5 smart-TP field)
+_HEDGE_S6_ProfitMult=3.0||3.0||0.1||1.2||4.0||N        ; DEPRECATED in v6
+_HEDGE_S6_SLMult=1.0||1.0||1||1.0||1.0||N
+_HEDGE_S6_ExtPts=100||100||1||100||100||N    ; v6: points past parent SL
+_HEDGE_S6_TPMult=3.0||3.0||0.1||3.0||3.0||N  ; v6: TP = ExtPts Ã— TPMult

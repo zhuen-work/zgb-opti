@@ -38,7 +38,7 @@ from zgb_sim.orb import ORBConfig
 from zgb_sim.orb_fast import simulate_fast as orb_simulate
 
 DEPOSIT = 10_000.0
-SPREAD = 23
+SPREAD = 30  # per feedback_default_test_conditions.md (all live = 30pt 2026-05-16)
 PER_STREAM_RISK = 1.0   # 3% portfolio / 3 streams
 
 STREAMS = [

@@ -31,7 +31,7 @@ DEPOSIT = 10_000.0
 WFO_DIR = ROOT / "output" / "wfo_orb_may2"
 START = datetime(2026, 2, 14, tzinfo=timezone.utc)
 END = datetime(2026, 5, 1, tzinfo=timezone.utc)
-SPREADS = (23, 35, 55)
+SPREADS = (30, 35, 55)  # per feedback_default_test_conditions.md (all live = 30pt 2026-05-16)
 
 
 def row_to_cfg(row, comment: str, risk_pct: float) -> ORBConfig:

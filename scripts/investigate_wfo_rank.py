@@ -38,7 +38,7 @@ from zgb_sim.wfo_helpers import (WINDOWS_MAY2 as WINDOWS, rank_with_p0,
 WFO_DIR = ROOT / "output" / "wfo_orb_may2"
 SYMBOL = "XAUUSD"
 DEPOSIT = 10_000.0
-SPREAD = 23
+SPREAD = 30  # per feedback_default_test_conditions.md (all live = 30pt 2026-05-16)
 START = datetime(2026, 2, 14, tzinfo=timezone.utc)
 END = datetime(2026, 5, 1, tzinfo=timezone.utc)
 

@@ -29,8 +29,27 @@ D_DRIVE_SET = Path("D:/v6/dt818_pro_v6_9pct_may23_may16.set")
 APPDATA_EA  = Path("C:/Users/Zhu-En/AppData/Roaming/MetaQuotes/Terminal/AE2CC2E013FDE1E3CDF010AA51C60400/MQL5/Experts/DT818_pro_v6.ex5")
 
 
+def _check_version_log() -> int:
+    """Delegate to check_ea_version_log.py so build-drift also catches stale
+    OnInit Print tags (the 2026-05-25 v6/v4 incident)."""
+    try:
+        import subprocess
+        r = subprocess.run(
+            [sys.executable, str(Path(__file__).parent / "check_ea_version_log.py")],
+            capture_output=True, text=True, timeout=30)
+        return r.returncode
+    except Exception as e:
+        print(f"   [warn] check_ea_version_log failed to run: {e}")
+        return 0  # don't fail drift check on tool-runner error
+
+
 def main() -> int:
     issues = []
+
+    # Pre-flight: OnInit Print tags must match `#property version` (2026-05-25 incident)
+    version_rc = _check_version_log()
+    if version_rc != 0:
+        issues.append("  EA OnInit log version tag drift (run check_ea_version_log.py for details)")
 
     for label, path in [("D:/v6 EA", D_DRIVE_EA), ("D:/v6 setfile", D_DRIVE_SET),
                          ("AppData EA", APPDATA_EA)]:

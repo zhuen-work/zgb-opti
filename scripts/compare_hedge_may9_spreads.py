@@ -29,7 +29,7 @@ from sim_wfo_hedge import (STREAM_CFGS, HedgeCfg, run_baseline_window,
                             aggregate, DEPOSIT, SYMBOL, PARENT_RISK_PROD,
                             HEDGE_RISK_PCT)
 
-SPREADS = [23, 55, 70]
+SPREADS = [30, 55, 70]  # per feedback_default_test_conditions.md (all live = 30pt 2026-05-16)
 HEDGE_DIR = ROOT / "output" / "wfo_hedge_per_stream_may9"
 
 

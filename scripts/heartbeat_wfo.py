@@ -19,10 +19,22 @@ elapsed_min = int((now.timestamp() - START_S) / 60) if START_S else 0
 hh = now.strftime("%H:%M")
 nxt = (now + timedelta(minutes=INTERVAL_MIN)).strftime("%H:%M")
 
-try:
-    log = open(LOG, "r", errors="replace").read() if LOG else ""
-except FileNotFoundError:
-    log = ""
+def _read_log(p):
+    if not p:
+        return ""
+    try:
+        with open(p, "rb") as f:
+            raw = f.read()
+    except FileNotFoundError:
+        return ""
+    # PowerShell Tee-Object default = UTF-16 LE with BOM.
+    if raw.startswith(b"\xff\xfe"):
+        return raw.decode("utf-16-le", errors="replace")
+    if raw.startswith(b"\xfe\xff"):
+        return raw.decode("utf-16-be", errors="replace")
+    return raw.decode("utf-8", errors="replace")
+
+log = _read_log(LOG)
 
 # Phase from "=== PHASE X ===" markers
 phases = re.findall(r"^=== (PHASE [A-D][^=]*) ===", log, re.M)

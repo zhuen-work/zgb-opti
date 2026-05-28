@@ -1,0 +1,209 @@
+; DT818_pro_v4 - 6-stream ORB rank portfolio + 6 SMART-TP REVERSE hedges (MAY23 reopt)
+; Generated 2026-05-23 from wfo_orb_may23/winner_p1.json + wfo_hedge_reverse_may23/winner.json
+; Use with ea/DT818_pro_v4.mq5 (compiled 2026-05-20 with two-stage smart-TP geometry).
+;
+; PARENT total risk: 9.0% (1.5% x 6 streams). Range filter DISABLED.
+; ROTATION 2026-05-23:
+;   S1-S3 = MAY16 R2/R3/R4 (PREVIOUS-week WFO, rotated down from S4-S6), magics 1111/2222/3333
+;   S4-S6 = MAY23 R1/R2/R3 (CURRENT-week WFO), magics 4444/5555/6666
+;   S4-S6 winners ALL ship at grid floor (SL=400 RR=2.0) -- boundary warning acknowledged per user 2026-05-23.
+;   Diversity collapse: ranks 1-4 all SL=400 RR=2.0, only HTP differs (0.0/0.6/0.4/0.2).
+;
+; SMART-TP REVERSE-HEDGE config (from wfo_hedge_reverse_may23/winner.json):
+;   Direction:    OPPOSITE of parent
+;   Order type:   TWO LIMITs per parent SL at parent_entry:
+;                   _s1: closes alpha fraction at BE-of-combined-loss
+;                   _s2: closes (1-alpha) fraction at profit_mult * combined-loss
+;   SL distance:  parent_SL_pts * sl_mult  (per-stream)
+;   TP geometry:  tp1_dist = sl_dist * sl_mult / alpha
+;                 tp2_dist = sl_dist * sl_mult * profit_mult / (1 - alpha)
+;   Validity:     alpha > 1 / (profit_mult + 1)  (winner=0.5 + pm>=2.5 satisfies)
+;   Lots:         parent_lots / sl_mult  (risk-equalized)
+;   Global expire_minutes = 240   (4h)
+;   Global F1 filter      = 1800s (30min cap)
+;   Global regime_gate    = off
+;   Hedge magics: 8111/8222/8333/8444/8555/8666 (each places TWO sub-orders per SL).
+;
+; MAY23 hedge WFO portfolio compare: P0 FAILED (slope -108.3%, best-of-failed used)
+;   Total IS+OOS NP across 4 folds: $91,832 (W1 $+38,566 -> W2 $+23,017 -> W3 $+33,461 -> W4 $-3,212)
+;   W4 OOS (5/16-5/23) is the recent live week -- hedge took -$3k in sim, but live W4 hedge +$1k incl 5/22 +$17.6k save.
+;
+; Per-stream MAY23 hedge winners (alpha=0.5 for all, sl_mult & profit_mult per stream):
+;   S1: sl_mult=1.0, alpha=0.5, pm=3.0
+;   S2: sl_mult=1.0, alpha=0.5, pm=3.0
+;   S3: sl_mult=1.0, alpha=0.5, pm=3.0
+;   S4: sl_mult=1.2, alpha=0.5, pm=3.5
+;   S5: sl_mult=1.2, alpha=0.5, pm=3.5
+;   S6: sl_mult=1.2, alpha=0.5, pm=3.5
+;
+; NOTE: _HEDGE_Sn_RR_Ratio is DECORATIVE in v4 smart-TP mode (EA computes
+;       tp1_dist/tp2_dist from sl_mult+alpha+profit_mult). Kept for legacy display.
+;
+; Spread guard: _MaxSpreadPts=60 (Vantage max observed 32pt; sim default 30pt)
+
+; ===== Global account =====
+_CapitalProtectionAmount=0.0||0.0||1||0.0||0.0||N
+_RiskPct=1.5||1.5||1||1.5||1.5||N
+_LotMode=1||1||1||1||1||N
+TierBase=2000||2000||1||2000||2000||N
+LotStep=0.01||0.01||1||0.01||0.01||N
+_MaxSpreadPts=60||60||1||60||60||N
+
+; ===== ORB shared params =====
+_BrokerGMTOffsetHours=0||0||1||0||0||N  ; DEPRECATED post 2026-05-07 (EA uses TimeGMT)
+_ORB_MinRangePts=0||0||1||0||0||N             ; range filter DISABLED
+_ORB_MaxRangePts=999999||999999||1||999999||999999||N
+_ORB_LDN_Enabled=true
+_ORB_LDN_StartHour=4||4||1||4||4||N
+_ORB_NY_Enabled=true
+_ORB_NY_StartHour=10||10||1||10||10||N
+
+; ===== ORB_S1 -- MAY16 R2 (was S4) (magic 1111) =====
+_ORB_S1_Enabled=true
+_ORB_S1_Magic=1111||1111||1||1111||1111||N
+_ORB_S1_Comment=ORB_S1
+_ORB_S1_RangeMinutes=90||90||1||90||90||N
+_ORB_S1_FixedSL_Pts=550||550||1||550||550||N
+_ORB_S1_RR_Ratio=4.0||4.0||1||4.0||4.0||N
+_ORB_S1_HalfTP_Ratio=0.4||0.4||1||0.4||0.4||N
+_ORB_S1_PendingExpireMinutes=240||240||1||240||240||N
+_ORB_S1_DailyTargetPct=0.0||0.0||1||0.0||0.0||N
+_ORB_S1_DailyLossPct=0.0||0.0||1||0.0||0.0||N
+
+; ===== ORB_S2 -- MAY16 R3 (was S5) (magic 2222) =====
+_ORB_S2_Enabled=true
+_ORB_S2_Magic=2222||2222||1||2222||2222||N
+_ORB_S2_Comment=ORB_S2
+_ORB_S2_RangeMinutes=90||90||1||90||90||N
+_ORB_S2_FixedSL_Pts=550||550||1||550||550||N
+_ORB_S2_RR_Ratio=3.5||3.5||1||3.5||3.5||N
+_ORB_S2_HalfTP_Ratio=0.4||0.4||1||0.4||0.4||N
+_ORB_S2_PendingExpireMinutes=240||240||1||240||240||N
+_ORB_S2_DailyTargetPct=0.0||0.0||1||0.0||0.0||N
+_ORB_S2_DailyLossPct=0.0||0.0||1||0.0||0.0||N
+
+; ===== ORB_S3 -- MAY16 R4 (was S6) (magic 3333) =====
+_ORB_S3_Enabled=true
+_ORB_S3_Magic=3333||3333||1||3333||3333||N
+_ORB_S3_Comment=ORB_S3
+_ORB_S3_RangeMinutes=90||90||1||90||90||N
+_ORB_S3_FixedSL_Pts=550||550||1||550||550||N
+_ORB_S3_RR_Ratio=3.0||3.0||1||3.0||3.0||N
+_ORB_S3_HalfTP_Ratio=0.4||0.4||1||0.4||0.4||N
+_ORB_S3_PendingExpireMinutes=240||240||1||240||240||N
+_ORB_S3_DailyTargetPct=0.0||0.0||1||0.0||0.0||N
+_ORB_S3_DailyLossPct=0.0||0.0||1||0.0||0.0||N
+
+; ===== ORB_S4 -- MAY23 R1 (NEW, boundary-accepted) (magic 4444) =====
+_ORB_S4_Enabled=true
+_ORB_S4_Magic=4444||4444||1||4444||4444||N
+_ORB_S4_Comment=ORB_S4
+_ORB_S4_RangeMinutes=90||90||1||90||90||N
+_ORB_S4_FixedSL_Pts=400||400||1||400||400||N
+_ORB_S4_RR_Ratio=2.0||2.0||1||2.0||2.0||N
+_ORB_S4_HalfTP_Ratio=0.0||0.0||1||0.0||0.0||N
+_ORB_S4_PendingExpireMinutes=240||240||1||240||240||N
+_ORB_S4_DailyTargetPct=0.0||0.0||1||0.0||0.0||N
+_ORB_S4_DailyLossPct=0.0||0.0||1||0.0||0.0||N
+
+; ===== ORB_S5 -- MAY23 R2 (NEW) (magic 5555) =====
+_ORB_S5_Enabled=true
+_ORB_S5_Magic=5555||5555||1||5555||5555||N
+_ORB_S5_Comment=ORB_S5
+_ORB_S5_RangeMinutes=90||90||1||90||90||N
+_ORB_S5_FixedSL_Pts=400||400||1||400||400||N
+_ORB_S5_RR_Ratio=2.0||2.0||1||2.0||2.0||N
+_ORB_S5_HalfTP_Ratio=0.6||0.6||1||0.6||0.6||N
+_ORB_S5_PendingExpireMinutes=240||240||1||240||240||N
+_ORB_S5_DailyTargetPct=0.0||0.0||1||0.0||0.0||N
+_ORB_S5_DailyLossPct=0.0||0.0||1||0.0||0.0||N
+
+; ===== ORB_S6 -- MAY23 R3 (NEW) (magic 6666) =====
+_ORB_S6_Enabled=true
+_ORB_S6_Magic=6666||6666||1||6666||6666||N
+_ORB_S6_Comment=ORB_S6
+_ORB_S6_RangeMinutes=90||90||1||90||90||N
+_ORB_S6_FixedSL_Pts=400||400||1||400||400||N
+_ORB_S6_RR_Ratio=2.0||2.0||1||2.0||2.0||N
+_ORB_S6_HalfTP_Ratio=0.4||0.4||1||0.4||0.4||N
+_ORB_S6_PendingExpireMinutes=240||240||1||240||240||N
+_ORB_S6_DailyTargetPct=0.0||0.0||1||0.0||0.0||N
+_ORB_S6_DailyLossPct=0.0||0.0||1||0.0||0.0||N
+
+; ===== HEDGE_S1r -- SMART-TP: sl_mult=1.0, alpha=0.5, pm=3.0 =====
+_HEDGE_S1_Enabled=true
+_HEDGE_S1_Magic=8111||8111||1||8111||8111||N
+_HEDGE_S1_Comment=ORB_S1r
+_HEDGE_S1_ParentMagic=1111||1111||1||1111||1111||N
+_HEDGE_S1_FixedSL_Pts=550||550||1||550||550||N
+_HEDGE_S1_RR_Ratio=3.0||3.0||1||3.0||3.0||N
+_HEDGE_S1_ExpireMinutes=240||240||1||240||240||N
+_HEDGE_S1_MaxSecondsAfterEntry=1800||1800||1||1800||1800||N
+_HEDGE_S1_PartialFraction=0.5||0.5||0.05||0.5||0.7||N
+_HEDGE_S1_ProfitMult=3.0||3.0||0.1||1.2||4.0||N
+_HEDGE_S1_SLMult=1.0||1.0||1||1.0||1.0||N
+
+; ===== HEDGE_S2r -- SMART-TP: sl_mult=1.0, alpha=0.5, pm=3.0 =====
+_HEDGE_S2_Enabled=true
+_HEDGE_S2_Magic=8222||8222||1||8222||8222||N
+_HEDGE_S2_Comment=ORB_S2r
+_HEDGE_S2_ParentMagic=2222||2222||1||2222||2222||N
+_HEDGE_S2_FixedSL_Pts=550||550||1||550||550||N
+_HEDGE_S2_RR_Ratio=3.0||3.0||1||3.0||3.0||N
+_HEDGE_S2_ExpireMinutes=240||240||1||240||240||N
+_HEDGE_S2_MaxSecondsAfterEntry=1800||1800||1||1800||1800||N
+_HEDGE_S2_PartialFraction=0.5||0.5||0.05||0.5||0.7||N
+_HEDGE_S2_ProfitMult=3.0||3.0||0.1||1.2||4.0||N
+_HEDGE_S2_SLMult=1.0||1.0||1||1.0||1.0||N
+
+; ===== HEDGE_S3r -- SMART-TP: sl_mult=1.0, alpha=0.5, pm=3.0 =====
+_HEDGE_S3_Enabled=true
+_HEDGE_S3_Magic=8333||8333||1||8333||8333||N
+_HEDGE_S3_Comment=ORB_S3r
+_HEDGE_S3_ParentMagic=3333||3333||1||3333||3333||N
+_HEDGE_S3_FixedSL_Pts=550||550||1||550||550||N
+_HEDGE_S3_RR_Ratio=3.0||3.0||1||3.0||3.0||N
+_HEDGE_S3_ExpireMinutes=240||240||1||240||240||N
+_HEDGE_S3_MaxSecondsAfterEntry=1800||1800||1||1800||1800||N
+_HEDGE_S3_PartialFraction=0.5||0.5||0.05||0.5||0.7||N
+_HEDGE_S3_ProfitMult=3.0||3.0||0.1||1.2||4.0||N
+_HEDGE_S3_SLMult=1.0||1.0||1||1.0||1.0||N
+
+; ===== HEDGE_S4r -- SMART-TP: sl_mult=1.2, alpha=0.5, pm=3.5 =====
+_HEDGE_S4_Enabled=true
+_HEDGE_S4_Magic=8444||8444||1||8444||8444||N
+_HEDGE_S4_Comment=ORB_S4r
+_HEDGE_S4_ParentMagic=4444||4444||1||4444||4444||N
+_HEDGE_S4_FixedSL_Pts=480||480||1||480||480||N
+_HEDGE_S4_RR_Ratio=2.92||2.92||1||2.92||2.92||N
+_HEDGE_S4_ExpireMinutes=240||240||1||240||240||N
+_HEDGE_S4_MaxSecondsAfterEntry=1800||1800||1||1800||1800||N
+_HEDGE_S4_PartialFraction=0.5||0.5||0.05||0.5||0.7||N
+_HEDGE_S4_ProfitMult=3.5||3.5||0.1||1.2||4.0||N
+_HEDGE_S4_SLMult=1.2||1.2||1||1.2||1.2||N
+
+; ===== HEDGE_S5r -- SMART-TP: sl_mult=1.2, alpha=0.5, pm=3.5 =====
+_HEDGE_S5_Enabled=true
+_HEDGE_S5_Magic=8555||8555||1||8555||8555||N
+_HEDGE_S5_Comment=ORB_S5r
+_HEDGE_S5_ParentMagic=5555||5555||1||5555||5555||N
+_HEDGE_S5_FixedSL_Pts=480||480||1||480||480||N
+_HEDGE_S5_RR_Ratio=2.92||2.92||1||2.92||2.92||N
+_HEDGE_S5_ExpireMinutes=240||240||1||240||240||N
+_HEDGE_S5_MaxSecondsAfterEntry=1800||1800||1||1800||1800||N
+_HEDGE_S5_PartialFraction=0.5||0.5||0.05||0.5||0.7||N
+_HEDGE_S5_ProfitMult=3.5||3.5||0.1||1.2||4.0||N
+_HEDGE_S5_SLMult=1.2||1.2||1||1.2||1.2||N
+
+; ===== HEDGE_S6r -- SMART-TP: sl_mult=1.2, alpha=0.5, pm=3.5 =====
+_HEDGE_S6_Enabled=true
+_HEDGE_S6_Magic=8666||8666||1||8666||8666||N
+_HEDGE_S6_Comment=ORB_S6r
+_HEDGE_S6_ParentMagic=6666||6666||1||6666||6666||N
+_HEDGE_S6_FixedSL_Pts=480||480||1||480||480||N
+_HEDGE_S6_RR_Ratio=2.92||2.92||1||2.92||2.92||N
+_HEDGE_S6_ExpireMinutes=240||240||1||240||240||N
+_HEDGE_S6_MaxSecondsAfterEntry=1800||1800||1||1800||1800||N
+_HEDGE_S6_PartialFraction=0.5||0.5||0.05||0.5||0.7||N
+_HEDGE_S6_ProfitMult=3.5||3.5||0.1||1.2||4.0||N
+_HEDGE_S6_SLMult=1.2||1.2||1||1.2||1.2||N

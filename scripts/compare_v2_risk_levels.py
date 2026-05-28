@@ -19,7 +19,7 @@ from zgb_sim.wfo_helpers import to_utc
 from sim_wfo_hedge import slice_window, aggregate, DEPOSIT, SYMBOL
 from compare_pro_vs_v2 import MAY9_CFGS, MAY2_CFGS, portfolio
 
-SPREADS = [23, 55, 70]
+SPREADS = [30, 55, 70]  # per feedback_default_test_conditions.md (all live = 30pt 2026-05-16)
 TOTAL_RISKS = [3.0, 6.0, 9.0]
 START_DATE = date(2026, 2, 21)
 END_DATE   = date(2026, 5, 9)

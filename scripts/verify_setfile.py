@@ -33,7 +33,7 @@ from zgb_sim.orb_fast import simulate_fast as orb_simulate
 
 SYMBOL = "XAUUSD"
 DEPOSIT = 10_000.0
-SPREAD = 23
+SPREAD = 30  # per feedback_default_test_conditions.md (all live = 30pt 2026-05-16)
 START = datetime(2026, 2, 14, tzinfo=timezone.utc)
 END = datetime(2026, 5, 1, tzinfo=timezone.utc)
 

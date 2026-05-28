@@ -37,7 +37,7 @@ SYMBOL = "XAUUSD"
 DEPOSIT = 10_000.0
 START = datetime(2026, 2, 14, tzinfo=timezone.utc)
 END = datetime(2026, 5, 1, tzinfo=timezone.utc)
-SPREAD = 23
+SPREAD = 30  # per feedback_default_test_conditions.md (all live = 30pt 2026-05-16)
 POINT = 0.01
 CONTRACT = 100  # $/lot/pt for XAUUSD
 

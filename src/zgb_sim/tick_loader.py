@@ -34,6 +34,19 @@ SYMBOL_DEFAULT_SPREAD_PTS = {
     "XAUUSD.sc": 60,
     "NAS100.r": 250,     # measured median 180, p99 220 (2026-04 -> 2026-05)
 }
+# Optional global override via env var — inherited by multiprocessing workers
+# (which re-import this module from scratch). Set ZGB_SPREAD_PTS_OVERRIDE=N to
+# force all per-symbol defaults to N for the lifetime of the process tree.
+import os as _os
+_env_override = _os.environ.get("ZGB_SPREAD_PTS_OVERRIDE")
+if _env_override:
+    try:
+        _ov = int(_env_override)
+        SIM_SPREAD_PTS = _ov
+        for _sym in list(SYMBOL_DEFAULT_SPREAD_PTS):
+            SYMBOL_DEFAULT_SPREAD_PTS[_sym] = _ov
+    except ValueError:
+        pass
 
 
 def kill_mt5_terminal() -> None:

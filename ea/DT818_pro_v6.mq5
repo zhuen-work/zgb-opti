@@ -1288,16 +1288,47 @@ int OnInit()
    g_s6_bal_start = bal;
 
    long broker_off = (long)TimeCurrent() - (long)TimeGMT();
-   PrintFormat("[DT818_pro_v4] Init. Parents S1=%d S2=%d S3=%d S4=%d S5=%d S6=%d  "
-               "Reverse-Hedges R1=%d R2=%d R3=%d R4=%d R5=%d R6=%d  "
-               "Sessions LDN_hr=%d NY_hr=%d (real UTC, v2.1 broker offset patches active, "
-               "broker=%+.1fh vs UTC; hedge order_type=LIMIT, dir=OPPOSITE, SL/TP=MIRRORED)",
+   PrintFormat("[DT818_pro_v6] Init. Parents S1=%d S2=%d S3=%d S4=%d S5=%d S6=%d  "
+               "STOP-ext Hedges H1=%d H2=%d H3=%d H4=%d H5=%d H6=%d  "
+               "Sessions LDN_hr=%d NY_hr=%d  FractalConfirm=%s width=%d  "
+               "(real UTC, broker=%+.1fh vs UTC; hedge type=STOP-on-extension)",
                _ORB_S1_Enabled, _ORB_S2_Enabled, _ORB_S3_Enabled,
                _ORB_S4_Enabled, _ORB_S5_Enabled, _ORB_S6_Enabled,
                _HEDGE_S1_Enabled, _HEDGE_S2_Enabled, _HEDGE_S3_Enabled,
                _HEDGE_S4_Enabled, _HEDGE_S5_Enabled, _HEDGE_S6_Enabled,
                _ORB_LDN_StartHour, _ORB_NY_StartHour,
+               (_ORB_FractalConfirm ? "true" : "false"), _ORB_FractalWidth,
                broker_off / 3600.0);
+   // Per-stream parent params — confirms which setfile is actually loaded
+   PrintFormat("[DT818_pro_v6] Parents: "
+               "S1[cm=%s SL=%d RR=%.1f HTP=%.2f Exp=%d]  "
+               "S2[cm=%s SL=%d RR=%.1f HTP=%.2f Exp=%d]  "
+               "S3[cm=%s SL=%d RR=%.1f HTP=%.2f Exp=%d]",
+               _ORB_S1_Comment, _ORB_S1_FixedSL_Pts, _ORB_S1_RR_Ratio, _ORB_S1_HalfTP_Ratio, _ORB_S1_PendingExpireMinutes,
+               _ORB_S2_Comment, _ORB_S2_FixedSL_Pts, _ORB_S2_RR_Ratio, _ORB_S2_HalfTP_Ratio, _ORB_S2_PendingExpireMinutes,
+               _ORB_S3_Comment, _ORB_S3_FixedSL_Pts, _ORB_S3_RR_Ratio, _ORB_S3_HalfTP_Ratio, _ORB_S3_PendingExpireMinutes);
+   PrintFormat("[DT818_pro_v6] Parents: "
+               "S4[cm=%s SL=%d RR=%.1f HTP=%.2f Exp=%d]  "
+               "S5[cm=%s SL=%d RR=%.1f HTP=%.2f Exp=%d]  "
+               "S6[cm=%s SL=%d RR=%.1f HTP=%.2f Exp=%d]",
+               _ORB_S4_Comment, _ORB_S4_FixedSL_Pts, _ORB_S4_RR_Ratio, _ORB_S4_HalfTP_Ratio, _ORB_S4_PendingExpireMinutes,
+               _ORB_S5_Comment, _ORB_S5_FixedSL_Pts, _ORB_S5_RR_Ratio, _ORB_S5_HalfTP_Ratio, _ORB_S5_PendingExpireMinutes,
+               _ORB_S6_Comment, _ORB_S6_FixedSL_Pts, _ORB_S6_RR_Ratio, _ORB_S6_HalfTP_Ratio, _ORB_S6_PendingExpireMinutes);
+   // Per-stream hedge params — confirms STOP-ext config
+   PrintFormat("[DT818_pro_v6] STOP-ext Hedges: "
+               "H1[cm=%s ExtPts=%d TPx%.1f SLx%.1f F1=%ds Exp=%dm]  "
+               "H2[cm=%s ExtPts=%d TPx%.1f SLx%.1f F1=%ds Exp=%dm]  "
+               "H3[cm=%s ExtPts=%d TPx%.1f SLx%.1f F1=%ds Exp=%dm]",
+               _HEDGE_S1_Comment, _HEDGE_S1_ExtPts, _HEDGE_S1_TPMult, _HEDGE_S1_SLMult, _HEDGE_S1_MaxSecondsAfterEntry, _HEDGE_S1_ExpireMinutes,
+               _HEDGE_S2_Comment, _HEDGE_S2_ExtPts, _HEDGE_S2_TPMult, _HEDGE_S2_SLMult, _HEDGE_S2_MaxSecondsAfterEntry, _HEDGE_S2_ExpireMinutes,
+               _HEDGE_S3_Comment, _HEDGE_S3_ExtPts, _HEDGE_S3_TPMult, _HEDGE_S3_SLMult, _HEDGE_S3_MaxSecondsAfterEntry, _HEDGE_S3_ExpireMinutes);
+   PrintFormat("[DT818_pro_v6] STOP-ext Hedges: "
+               "H4[cm=%s ExtPts=%d TPx%.1f SLx%.1f F1=%ds Exp=%dm]  "
+               "H5[cm=%s ExtPts=%d TPx%.1f SLx%.1f F1=%ds Exp=%dm]  "
+               "H6[cm=%s ExtPts=%d TPx%.1f SLx%.1f F1=%ds Exp=%dm]",
+               _HEDGE_S4_Comment, _HEDGE_S4_ExtPts, _HEDGE_S4_TPMult, _HEDGE_S4_SLMult, _HEDGE_S4_MaxSecondsAfterEntry, _HEDGE_S4_ExpireMinutes,
+               _HEDGE_S5_Comment, _HEDGE_S5_ExtPts, _HEDGE_S5_TPMult, _HEDGE_S5_SLMult, _HEDGE_S5_MaxSecondsAfterEntry, _HEDGE_S5_ExpireMinutes,
+               _HEDGE_S6_Comment, _HEDGE_S6_ExtPts, _HEDGE_S6_TPMult, _HEDGE_S6_SLMult, _HEDGE_S6_MaxSecondsAfterEntry, _HEDGE_S6_ExpireMinutes);
    return INIT_SUCCEEDED;
 }
 

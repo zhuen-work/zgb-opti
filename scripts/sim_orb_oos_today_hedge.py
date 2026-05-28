@@ -39,7 +39,7 @@ from zgb_sim.orb_fast import simulate_fast as orb_simulate
 from zgb_sim.tick_loader import kill_mt5_terminal
 
 DEPOSIT = 10_000.0
-SPREAD = 23
+SPREAD = 30  # per feedback_default_test_conditions.md (all live = 30pt 2026-05-16)
 HEDGE_DIR = ROOT / "output" / "wfo_hedge_per_stream_may2"
 
 # OOS window: today only (00:00 UTC -> now)

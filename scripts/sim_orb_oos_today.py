@@ -28,7 +28,7 @@ from zgb_sim.orb_fast import simulate_fast as orb_simulate
 SYMBOL = "XAUUSD"
 LIVE_SYMBOL = None
 DEPOSIT = 10_000.0
-LIVE_SETFILE = ROOT / "configs" / "sets" / "dt818_pro_v3_9pct_may16_may9.set"
+LIVE_SETFILE = ROOT / "configs" / "sets" / "dt818_pro_v7_9pct_may30_may23.set"
 # Per feedback_default_test_conditions.md (2026-05-16: "all live = 30pt moving
 # forward"). Was 23pt previously; 30pt is the calibration-tight conservative
 # pick vs Vantage gold spreads (median ~25pt, max ~32pt).
@@ -153,19 +153,27 @@ def row_to_cfg(row, comment: str, risk_pct: float) -> ORBConfig:
     # NOT the LDN/NY sessions live EA actually trades (real UTC 07/13).
     # Sim PnL here will NOT match live PnL even on the same day. See
     # reference_vantage_broker_time.md.
+    # v7 deployment: range filter OFF, per-stream expire, V2 fractal-confirm +
+    # SMA(8,21) cross-exit globals (parsed from setfile) so apparent friction
+    # is apples-to-apples with the live v7 EA.
     return ORBConfig(
         risk_pct=risk_pct,
         range_minutes=int(row["range_minutes"]),
         buffer_pts=0,
-        min_range_pts=200, max_range_pts=5000,
+        min_range_pts=0, max_range_pts=999_999,
         fixed_sl_pts=int(row["fixed_sl_pts"]),
         rr_ratio=float(row["rr_ratio"]),
         half_tp_ratio=round(float(row["half_tp_ratio"]), 2),
-        pending_expire_minutes=240,
+        pending_expire_minutes=int(row.get("pending_expire_minutes", 240)),
         daily_target_pct=float(row["daily_target_pct"]),
         daily_loss_pct=float(row["daily_loss_pct"]),
         ldn_enabled=True, ldn_start_hour=7,
         ny_enabled=True,  ny_start_hour=13,
+        fractal_confirm=bool(row.get("fractal_confirm", True)),
+        fractal_width=int(row.get("fractal_width", 5)),
+        sma_cross_exit=bool(row.get("sma_cross_exit", True)),
+        sma_cross_fast=int(row.get("sma_cross_fast", 8)),
+        sma_cross_slow=int(row.get("sma_cross_slow", 21)),
         comment=comment,
     )
 
@@ -207,14 +215,31 @@ def main() -> int:
     days = (end - OOS_START).days
 
     def parse_setfile(path: Path):
-        """Parse _ORB_S{i}_{Param}=val||... lines from EA setfile, return 6 row dicts."""
+        """Parse _ORB_S{i}_{Param}=val||... lines + global fractal/SMA exit
+        settings from the EA setfile, return 6 row dicts (globals attached to each)."""
         import re
         text = path.read_text()
+
+        def _glob(key, default):
+            m = re.search(rf"_ORB_{key}=([^|\n;]+)", text)
+            if not m:
+                return default
+            v = m.group(1).strip()
+            return v
+
+        fractal_confirm = str(_glob("FractalConfirm", "true")).lower() == "true"
+        fractal_width = int(float(_glob("FractalWidth", 5)))
+        sma_cross_exit = str(_glob("SMA_CrossExit", "true")).lower() == "true"
+        sma_fast = int(float(_glob("SMA_FastPeriod", 8)))
+        sma_slow = int(float(_glob("SMA_SlowPeriod", 21)))
+
         rows = []
         for i in range(1, 7):
-            def _get(key):
+            def _get(key, default=None):
                 m = re.search(rf"_ORB_S{i}_{key}=([^|]+)\|\|", text)
                 if not m:
+                    if default is not None:
+                        return default
                     raise RuntimeError(f"S{i} {key} not found in {path}")
                 return m.group(1).strip()
             rows.append({
@@ -222,6 +247,12 @@ def main() -> int:
                 "fixed_sl_pts": int(_get("FixedSL_Pts")),
                 "rr_ratio": float(_get("RR_Ratio")),
                 "half_tp_ratio": float(_get("HalfTP_Ratio")),
+                "pending_expire_minutes": int(_get("PendingExpireMinutes", 240)),
+                "fractal_confirm": fractal_confirm,
+                "fractal_width": fractal_width,
+                "sma_cross_exit": sma_cross_exit,
+                "sma_cross_fast": sma_fast,
+                "sma_cross_slow": sma_slow,
                 "daily_target_pct": 999.0,
                 "daily_loss_pct": 999.0,
             })
@@ -229,11 +260,16 @@ def main() -> int:
 
     rows = parse_setfile(LIVE_SETFILE)
     labels = ["S1", "S2", "S3", "S4", "S5", "S6"]
-    sources = ["MAY9 R1", "MAY9 R2", "MAY9 R3",
-               "MAY16 R2", "MAY16 R3", "MAY16 R4"]  # per setfile header
+    # Read per-stream comment tags for source attribution (v7 setfile encodes them).
+    import re as _re
+    _txt = LIVE_SETFILE.read_text()
+    sources = []
+    for i in range(1, 7):
+        m = _re.search(rf"_ORB_S{i}_Comment=([^|\n]+)", _txt)
+        sources.append(m.group(1).strip() if m else f"S{i}")
 
     print("=" * 100)
-    print(f"  v3 6-stream OOS  |  {OOS_START.date()} -> {end.strftime('%Y-%m-%d %H:%M UTC')}  ({days}d)")
+    print(f"  v7 6-stream OOS  |  {OOS_START.date()} -> {end.strftime('%Y-%m-%d %H:%M UTC')}  ({days}d)")
     print(f"  Spread {SPREAD_LIVE}pt (live), $10k, total risk split N=6 (per_stream = total/6)")
     print(f"  Setfile: {LIVE_SETFILE.name}")
     for lbl, src, r in zip(labels, sources, rows):

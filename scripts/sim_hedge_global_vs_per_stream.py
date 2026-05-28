@@ -29,7 +29,7 @@ _spec.loader.exec_module(hg)
 
 SYMBOL = "XAUUSD"
 DEPOSIT = 10_000.0
-SPREAD = 23
+SPREAD = 30  # per feedback_default_test_conditions.md (all live = 30pt 2026-05-16)
 PARENT_RISK = 1.0  # production sizing
 
 PER_STREAM = {

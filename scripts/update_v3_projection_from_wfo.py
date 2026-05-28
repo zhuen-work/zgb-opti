@@ -111,25 +111,45 @@ def parse_log(log_path: Path) -> dict:
         out["v3_hedge_trades"] = out["v3_trades"] - out["v2_1_trades"]
 
     # ---- Per-stream contribution table ----
-    # Old (pre-2026-05-17): "  S1      5.0   1.0   $+152,971      268 $ +95,627     87    28%"
-    # New (R6+, with buf col): "  S1      5.0   1.0   0     $ +10,006      268 $  +6,377     87    28%"
+    # Schema evolution:
+    #   v1 (pre-2026-05-17): "  S1      5.0   1.0   $+152,971  268 $ +95,627  87  28%"      # tp_mult, sl_mult
+    #   v2 (R6, buf col):    "  S1      5.0   1.0   0     $ +10,006  268 $ +6,377  87  28%"  # tp_mult, sl_mult, buf
+    #   v3 (smart-TP 2026-05-19): "  S1   1.0  0.5  1.2   $ +10,006  268 $ +6,377  87  28%"  # sl_mult, alpha, profit_mult
     # Money tokens sometimes have space after $ ($ +6,377), sometimes not ($+164,738).
     money = r"(\$\s*[+-]?[\d,]+)"
-    stream_re = re.compile(
-        rf"^\s+(S\d)\s+([\d.]+)\s+([\d.]+)\s+(?:(\d+)\s+)?{money}\s+(\d+)\s+{money}\s+(\d+)\s+(\d+)%\s*$", re.M)
+    # Match v3 first (3 floats + 4 numeric groups), then v1/v2 fallback.
     streams = {}
-    for m in stream_re.finditer(text):
+    # v3 regex: stream + sl_mult + alpha + profit_mult + parent_np + parent_n + hedge_np + hedge_n + hedge_wr
+    stream_v3_re = re.compile(
+        rf"^\s+(S\d)\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)\s+{money}\s+(\d+)\s+{money}\s+(\d+)\s+(\d+)%\s*$", re.M)
+    for m in stream_v3_re.finditer(text):
         s = m.group(1)
         streams[s] = {
-            "tp_mult": float(m.group(2)),
-            "sl_mult": float(m.group(3)),
-            "buffer_pts": int(m.group(4)) if m.group(4) is not None else 0,
+            "sl_mult": float(m.group(2)),
+            "partial_fraction": float(m.group(3)),
+            "profit_mult": float(m.group(4)),
             "parent_np": parse_money(m.group(5)),
             "parent_n": int(m.group(6)),
             "hedge_np": parse_money(m.group(7)),
             "hedge_n": int(m.group(8)),
             "hedge_wr": float(m.group(9)) / 100.0,
         }
+    # v1/v2 fallback (older WFO outputs still parsed for back-compat)
+    if not streams:
+        stream_v12_re = re.compile(
+            rf"^\s+(S\d)\s+([\d.]+)\s+([\d.]+)\s+(?:(\d+)\s+)?{money}\s+(\d+)\s+{money}\s+(\d+)\s+(\d+)%\s*$", re.M)
+        for m in stream_v12_re.finditer(text):
+            s = m.group(1)
+            streams[s] = {
+                "tp_mult": float(m.group(2)),
+                "sl_mult": float(m.group(3)),
+                "buffer_pts": int(m.group(4)) if m.group(4) is not None else 0,
+                "parent_np": parse_money(m.group(5)),
+                "parent_n": int(m.group(6)),
+                "hedge_np": parse_money(m.group(7)),
+                "hedge_n": int(m.group(8)),
+                "hedge_wr": float(m.group(9)) / 100.0,
+            }
     if streams:
         out["per_stream"] = streams
 
@@ -233,12 +253,37 @@ def build_projection_update(parsed: dict, existing: dict) -> dict:
             if k.startswith("per_stream_sim_contribution_") and k != contrib_key:
                 del proj[k]
 
-        # per_stream_hedge_cfg from the same parsed data (source = WFO winner)
-        proj["per_stream_hedge_cfg"] = {
-            s: {"tp_mult": d["tp_mult"], "sl_mult": d["sl_mult"],
-                "r_ratio": round(d["tp_mult"] / d["sl_mult"], 2)}
-            for s, d in per_stream.items()
-        }
+        # per_stream_hedge_cfg from the same parsed data (source = WFO winner).
+        # Schema depends on which WFO format was parsed: v3 smart-TP outputs
+        # {sl_mult, partial_fraction, profit_mult}; older outputs have {tp_mult, sl_mult}.
+        def _hedge_cfg(d: dict) -> dict:
+            if "partial_fraction" in d:
+                return {
+                    "sl_mult": d["sl_mult"],
+                    "partial_fraction": d["partial_fraction"],
+                    "profit_mult": d["profit_mult"],
+                }
+            return {
+                "tp_mult": d["tp_mult"],
+                "sl_mult": d["sl_mult"],
+                "r_ratio": round(d["tp_mult"] / d["sl_mult"], 2),
+            }
+        proj["per_stream_hedge_cfg"] = {s: _hedge_cfg(d) for s, d in per_stream.items()}
+
+        # EA generation tag — refresh from log format so the console subtitle
+        # tracks reality. The smart-TP per-stream schema (partial_fraction +
+        # profit_mult) is the v4 signature; the older tp_mult-only schema is
+        # v3. Without this, `proj = dict(existing)` would freeze the prior
+        # generation's strings even after rolling EA versions.
+        is_smart_tp = any("partial_fraction" in d for d in per_stream.values())
+        if is_smart_tp:
+            proj["ea"] = "DT818_pro_v4.mq5"
+            proj["ea_version"] = ("v4 smart-TP reverse-hedge (two-stage partial close, "
+                                  "risk-equalized lots)")
+        else:
+            proj["ea"] = "DT818_pro_v3.mq5"
+            proj["ea_version"] = ("v3 reverse-hedge, risk-equalized lots "
+                                  "(SLMult support)")
 
     # Weekly + daily projections (Method B: compound rate × live balance × haircut)
     v3_np = parsed.get("v3_with_hedge_np")
@@ -359,8 +404,12 @@ def main() -> int:
     print(f"    v2.1 NP: ${parsed['v2_1_no_hedge_np']:+,.0f}    "
           f"v3 NP: ${parsed['v3_with_hedge_np']:+,.0f}    "
           f"hedge delta: ${parsed['v3_hedge_only_np']:+,.0f}")
+    def _fmt(d: dict) -> str:
+        if "partial_fraction" in d:
+            return f"sl={d['sl_mult']}, a={d['partial_fraction']}, pm={d['profit_mult']}"
+        return f"tp={d['tp_mult']}, sl={d['sl_mult']}"
     print(f"    Per-stream picks: " + ", ".join(
-        f"{s}(tp={d['tp_mult']}, sl={d['sl_mult']})" for s, d in parsed["per_stream"].items()))
+        f"{s}({_fmt(d)})" for s, d in parsed["per_stream"].items()))
 
     if not PROJECTION_PATH.exists():
         print(f"[warn] {PROJECTION_PATH} doesn't exist; will create a new one.")

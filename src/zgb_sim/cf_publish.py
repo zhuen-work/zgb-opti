@@ -144,17 +144,32 @@ def publish_friction(date: str, sim_np: float, live_np: float,
     DB column name remains `friction_pct` for backward compat — value is
     apparent friction. See project_live_vs_sim_calibration_log.md.
 
-    Refuses to publish when sim_np == 0 (treated as missing sim leg — without
-    a real sim baseline the denominator floor of $100 produces a meaningless
-    percent that scales with -live_np and shows up on the dashboard as e.g.
-    +4061% on a -$4k day).
+    Refuses to publish when the sim leg is too thin to anchor a ratio, OR when
+    the resulting friction is so large the two legs are incomparable (window /
+    sign mismatch). The old guard only caught sim_np == 0 EXACTLY, so a sim leg
+    of e.g. $0.50 sailed through, hit the $100 denominator floor, and published
+    `live_np / $100` — surfacing as artifacts like -12690.8% (= -$12,690 live
+    parent / $100) or +4061%. See project_friction_zero_sim_guard_2026_05_25.
     """
-    if sim_np == 0.0:
-        print(f"[cf_publish] friction skipped: sim_np=0 (no sim baseline). "
-              f"live_np=${live_np:+,.0f} would produce a bogus % via denom floor.")
+    # A meaningful sim baseline (scaled to live balance) is at least a few
+    # hundred $ on a real trading day. Below this the $100 denom floor dominates
+    # and the percent becomes live_np/$100 — pure artifact, not friction.
+    MIN_SIM_BASELINE = 250.0
+    if abs(sim_np) < MIN_SIM_BASELINE:
+        print(f"[cf_publish] friction skipped: |sim_np|=${abs(sim_np):,.0f} "
+              f"< ${MIN_SIM_BASELINE:,.0f} baseline (sim leg too thin to anchor a ratio). "
+              f"live_np=${live_np:+,.0f} would produce a denom-floor artifact.")
         return False
-    denom = max(abs(sim_np), 100.0)
+    denom = abs(sim_np)  # >= MIN_SIM_BASELINE, so no floor needed
     friction_pct = (sim_np - live_np) / denom * 100.0
+    # Beyond this band the legs are incomparable (sign flip or window mismatch),
+    # not "high friction". Skip rather than publish a meaningless 4-5 digit %.
+    FRICTION_CAP = 300.0
+    if abs(friction_pct) > FRICTION_CAP:
+        print(f"[cf_publish] friction skipped: |friction|={friction_pct:+,.0f}% "
+              f"> {FRICTION_CAP:.0f}% cap (sim=${sim_np:+,.0f} vs live=${live_np:+,.0f} "
+              f"are incomparable — likely window/sign mismatch, not real friction).")
+        return False
     return _post("/ingest/friction", {
         "date": date, "sim_np": sim_np, "live_np": live_np,
         "friction_pct": friction_pct, "spread_pts": spread_pts,

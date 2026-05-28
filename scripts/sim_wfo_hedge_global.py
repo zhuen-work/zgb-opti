@@ -46,7 +46,7 @@ from zgb_sim.wfo_helpers import (WINDOWS_MAY2 as WINDOWS, rank_with_p0,
 
 SYMBOL = "XAUUSD"
 DEPOSIT = 10_000.0
-SPREAD = 23
+SPREAD = 30  # per feedback_default_test_conditions.md (all live = 30pt 2026-05-16)
 PARENT_RISK = 1.0       # production per-stream allocation (3% setfile / 3 streams)
 HEDGE_RISK_PCT = 1.0    # mirrors parent per-stream allocation
 
